@@ -41,9 +41,15 @@ h1,h2,p { margin: 0; }
 h1 { font: 500 clamp(45px, 5.1vw, 78px)/1.03 var(--serif); letter-spacing: -.075em; }
 h1 span { color: var(--amber); font-family: Georgia, serif; margin-left: .11em; }
 .masthead p { margin-top: 11px; color: #bdb6a9; font-size: 14px; letter-spacing: .065em; }
-.location { display: flex; gap: 9px; align-items: start; padding-bottom: 1px; font-size: 13px; white-space: nowrap; }
-.location small { display: block; color: var(--dim); font: 10px/1.7 var(--mono); letter-spacing: .15em; }
-.location-dot { width: 7px; height: 7px; background: var(--amber); border-radius: 50%; box-shadow: 0 0 12px #eab27d44; margin-top: 7px; }
+.locations { border: 0; padding: 0; margin: 0; min-width: 0; }
+.locations legend { padding: 0; margin-bottom: 5px; color: var(--mute); font-size: 11px; }
+.location-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.location-option { min-width: 0; text-align: left; white-space: nowrap; display: flex; align-items: center; gap: 8px; padding: 5px 9px 5px 5px; border: 1px solid var(--line); border-radius: 3px; background: var(--panel); color: #c9c4ba; font-size: 12px; }
+.location-option[aria-pressed="true"] { border-color: #876349; background: #322822; color: var(--ink); }
+.location-option:hover { border-color: var(--amber); }
+.location-thumb { display: block; flex: none; width: 47px; height: 30px; background: #353c43 center / cover; }
+.location-option small { display: block; color: var(--dim); font: 9px/1.55 var(--mono); letter-spacing: .06em; }
+.location-option[aria-pressed="true"] small { color: #b3a291; }
 .workbench { display: grid; grid-template-columns: minmax(0, 1fr) 306px; align-items: start; gap: 14px; }
 .viewer, .controls { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; min-width: 0; }
 .viewer { padding: 0 12px; }
@@ -125,13 +131,14 @@ button[aria-pressed="true"] .play-glyph { clip-path: polygon(0 0, 32% 0, 32% 100
 .shelf h2 { font: 500 30px var(--serif); }
 .shelf p { color: var(--mute); font-size: 12px; margin-top: 4px; }
 #shelf-tally { color: var(--dim); font: 11px var(--mono); white-space: nowrap; }
-.plates { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 13px; padding-top: 13px; }
+.plates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; padding-top: 13px; }
 .plate { background: var(--panel); border: 1px solid var(--line); border-radius: 3px; padding: 8px 8px 4px; min-width: 0; }
 .plate-cover { display: block; padding: 0; border: 0; width: 100%; background: #252b30; aspect-ratio: 16/9; }
 .plate-cover:hover { outline: 1px solid var(--amber); }
 .plate-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .plate-meta, .plate-actions { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
 .plate-meta { padding: 9px 0; }
+.plate-details { display: flex; align-items: center; gap: 7px; white-space: nowrap; color: var(--dim); font-size: 10px; }
 .plate h3 { font-size: 13px; font-weight: normal; margin: 0; }
 .plate-meta time { font: 10px var(--mono); color: var(--dim); }
 .plate-actions { border-top: 1px solid #33312d; }
@@ -144,6 +151,7 @@ dialog form { float: right; }
 dialog .close { font: 24px/1 var(--mono); padding: 0 4px; }
 dialog h2 { margin: 0 20px 15px 0; font: 500 29px var(--serif); }
 dialog p, dialog dd { color: #c6bfb3; font-size: 13px; }
+dialog p + p { margin-top: .75em; }
 dialog dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; padding: 12px 0; border-block: 1px solid var(--line); }
 dialog dt { color: var(--amber); }
 dialog dd { margin: 0; }
@@ -178,9 +186,9 @@ kbd { border: 1px solid #695645; border-radius: 3px; padding: 0 4px; }
   .top-inner { height: 56px; }
   nav { gap: 10px; }
   .help span:last-child { display: none; }
-  .masthead { padding: 24px 0 18px; }
+  .masthead { padding: 24px 0 18px; align-items: start; flex-direction: column; gap: 13px; }
   .masthead p { font-size: 12px; letter-spacing: .01em; }
-  .location { display: none; }
+  .locations { width: 100%; }
   .workbench { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .viewer { padding: 0 8px; }
   .film-label { height: 27px; }
@@ -190,6 +198,7 @@ kbd { border: 1px solid #695645; border-radius: 3px; padding: 0 4px; }
   .plates { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .plate { padding: 5px; }
   .plate-meta { display: block; }
+  .plate-details { margin-top: 2px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

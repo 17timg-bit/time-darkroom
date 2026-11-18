@@ -4,12 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#141412">
-  <meta name="application-version" content="1.1.0">
+  <meta name="application-version" content="1.2.0">
   <title>时间暗房 · Time Darkroom</title>
-  <link rel="stylesheet" href="src/darkroom.css?v=1.1.0">
-  <script defer src="assets/cape.js?v=1.1.0"></script>
-  <script defer src="src/optics.js?v=1.1.0"></script>
-  <script defer src="src/darkroom.js?v=1.1.0"></script>
+  <link rel="stylesheet" href="src/darkroom.css?v=1.2.0">
+  <script defer src="assets/cape.js?v=1.2.0"></script>
+  <script defer src="assets/lake.js?v=1.2.0"></script>
+  <script defer src="src/optics.js?v=1.2.0"></script>
+  <script defer src="src/darkroom.js?v=1.2.0"></script>
 </head>
 <body>
   <header class="topbar">
@@ -29,11 +30,23 @@
           <h1 id="title">时间暗房<span aria-hidden="true">.</span></h1>
           <p>同一个地方，可以同时存在于好几个时刻。</p>
         </div>
-        <div class="location"><span class="location-dot" aria-hidden="true"></span><span>岬角灯塔<small>THE CAPE LIGHT</small></span></div>
+        <fieldset class="locations">
+          <legend>取景地</legend>
+          <div class="location-options">
+            <button class="location-option" data-place="cape" type="button" aria-pressed="true">
+              <span class="location-thumb" aria-hidden="true"></span>
+              <span>岬角灯塔<small>THE CAPE LIGHT</small></span>
+            </button>
+            <button class="location-option" data-place="lake" type="button" aria-pressed="false">
+              <span class="location-thumb" aria-hidden="true"></span>
+              <span>镜湖<small>MIRROR LAKE</small></span>
+            </button>
+          </div>
+        </fieldset>
       </div>
       <div class="workbench">
         <section class="viewer" aria-label="曝光预览">
-          <div class="film-label"><span><i></i> <span id="view-status">静止曝光</span></span><span>虚构景片 <b>·</b> 01</span></div>
+          <div class="film-label"><span><i></i> <span id="view-status">静止曝光</span></span><span>虚构景片 <b>·</b> <span id="place-number">01</span></span></div>
           <div id="finder" class="finder">
             <canvas id="scene" aria-label="岬角灯塔，同一画面的各个位置来自不同时间"></canvas>
             <div class="loading" id="loading" role="status">正在装入底片…</div>
@@ -48,7 +61,7 @@
           <div class="deck">
             <div class="deck-buttons">
               <button id="play" class="quiet" type="button" aria-pressed="false"><span class="play-glyph" aria-hidden="true"></span><span id="play-label">让时间流动</span></button>
-              <label class="sound quiet"><input type="checkbox" id="sound"><span class="sound-glyph" aria-hidden="true">♩</span><span>海声</span></label>
+              <label class="sound quiet"><input type="checkbox" id="sound"><span class="sound-glyph" aria-hidden="true">♩</span><span id="sound-title">海声</span></label>
               <button id="share" class="quiet" type="button"><span class="share-glyph" aria-hidden="true">↗</span>分享曝光</button>
             </div>
             <p>在取景框上移动，查看局部时间</p>
@@ -96,12 +109,13 @@
       <div class="shelf-head"><div><h2 id="shelf-title">底片夹</h2><p>打开一张底片，就能回到它的时间。</p></div><span id="shelf-tally"></span></div>
       <div id="plates" class="plates"></div>
     </section>
-    <footer><span>TIME DARKROOM · v1.1.0</span><span>岬角灯塔 · 一次跨越整日的曝光</span></footer>
+    <footer><span>TIME DARKROOM · v1.2.0</span><span>岬角灯塔 / 镜湖</span></footer>
   </main>
   <dialog id="manual">
     <form method="dialog"><button class="quiet close" value="close" aria-label="关闭说明">×</button></form>
     <h2>在暗房里折叠一天</h2>
     <p>画面沿曝光方向依次取样。取景框下方的五个刻度显示从起点到终点的时刻。把方向调到 90°，时间就会从天空流向海面。</p>
+    <p>切换取景地时，当前曝光参数会随你过去。在镜湖，水面倒映的是湖面所取的时刻，天已经亮了，水里还可以有星星。</p>
     <dl>
       <dt>同刻</dt><dd>整张照片来自同一分钟。用它观察灯塔从破晓到入夜。</dd>
       <dt>扫过</dt><dd>从曝光起点走向终点，时间向前推进。</dd>

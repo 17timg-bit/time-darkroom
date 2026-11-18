@@ -4,6 +4,16 @@ const Optics = (() => {
     scan: [-.5, -.25, 0, .25, .5],
     fold: [-.5, -.12, .5, .12, -.5]
   };
+  const PLACES = {
+    cape: {
+      title: "岬角灯塔", english: "THE CAPE LIGHT", number: "01", sound: "海声",
+      water: [.519, 0], lantern: [.7345, .373, 1], textures: CAPE
+    },
+    lake: {
+      title: "镜湖", english: "MIRROR LAKE", number: "02", sound: "湖风",
+      water: [531 / 941, 1], lantern: [0, 0, 0], textures: LAKE
+    }
+  };
   const DAY = 1440;
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const wrapDay = value => {
@@ -14,7 +24,7 @@ const Optics = (() => {
     const rounded = wrapDay(Math.round(minutes));
     return [Math.floor(rounded / 60), rounded % 60].map(digit => String(digit).padStart(2, "0")).join(":");
   };
-  const initial = () => ({mode: "scan", minute: 995, span: 1200, curve: [...MODES.scan], angle: 0});
+  const initial = () => ({mode: "scan", minute: 995, span: 1200, curve: [...MODES.scan], angle: 0, place: "cape"});
   const copy = state => ({...state, curve: [...state.curve]});
   const offsetAt = (curve, x) => {
     const section = clamp(x, 0, 1) * 4;
@@ -35,14 +45,15 @@ const Optics = (() => {
     return .5 + (x - .5) * dx + (y - .5) * dy;
   }
   const cleanState = state => {
+    const place = state?.place ?? "cape";
     if (!state || (state.mode !== "custom" && !Object.hasOwn(MODES, state.mode)) ||
         !Number.isFinite(state.minute) || !Number.isFinite(state.span) ||
         !Array.isArray(state.curve) || state.curve.length !== 5 ||
         !state.curve.every(Number.isFinite) ||
-        !Number.isFinite(state.angle ?? 0)) return null;
+        !Number.isFinite(state.angle ?? 0) || typeof place !== "string" || !Object.hasOwn(PLACES, place)) return null;
     return {mode: state.mode, minute: wrapDay(state.minute), span: clamp(state.span, 30, DAY),
       curve: state.curve.map(value => clamp(value, -.5, .5)),
-      angle: clamp(Math.round(state.angle ?? 0), 0, 359)};
+      angle: clamp(Math.round(state.angle ?? 0), 0, 359), place};
   };
 
   const vertex = `attribute vec2 aPosition;
@@ -57,9 +68,9 @@ varying vec2 uv;
 uniform sampler2D uPhoto, uMask;
 uniform float uCenter, uSpan, uCurve[5];
 uniform vec2 uDirection;
+uniform vec2 uWater;
+uniform vec3 uLantern;
 const float TAU = 6.283185307;
-const float HORIZON = .519;
-const vec2 LANTERN = vec2(.7345, .373);
 
 float localTime(vec2 point) {
   float i = clamp(.5 + dot(point - .5, uDirection), 0., 1.) * 4.;
@@ -93,6 +104,15 @@ float stars(vec2 xy, float t, float cells) {
   float blink = .8 + .2 * cos(star * 140. + t * TAU * 5. / 24.);
   return core * smoothstep(.84, .997, star) * blink;
 }
+float starscape(vec2 xy, float t) {
+  return stars(xy, t, 31.) * .54 + stars(xy + .013, t, 55.) * .37;
+}
+float moonlight(vec2 xy, vec2 moon) {
+  float distanceToMoon = length(space(xy - moon));
+  float disc = 1. - smoothstep(.017, .0185, distanceToMoon);
+  float occlusion = 1. - smoothstep(.0158, .0181, length(space(xy - moon) - vec2(-.008, -.005)));
+  return disc * (1. - occlusion) * .77 + exp(-distanceToMoon * 24.) * .13;
+}
 void main() {
   float t = localTime(uv);
   float day = light(t);
@@ -100,14 +120,16 @@ void main() {
   float dawn = bell(t, 6.4, 1.18);
   float dusk = bell(t, 18.45, 1.17);
   float warm = dawn + dusk;
-  float skyGlow = bell(uv.y, HORIZON - .04, .34);
+  float horizon = uWater.x;
+  float mirror = uWater.y;
+  float skyGlow = bell(uv.y, horizon - .04, .34);
   vec2 mask = texture2D(uMask, uv).rg;
-  float seaDepth = clamp((uv.y - HORIZON) * 2.08, 0., 1.);
+  float seaDepth = clamp((uv.y - horizon) * 2.08, 0., 1.);
   float tide = t * TAU / 24.;
   vec2 ripple = vec2(
     sin(uv.y * 169. + seaDepth * seaDepth * 95. - tide * 19. + sin(uv.x * 49.)) * .0016,
     sin(uv.y * 117. - tide * 24. + uv.x * 31.) * .0010
-  ) * mask.g * smoothstep(.004, .09, seaDepth) * (.36 + seaDepth);
+  ) * mask.g * smoothstep(.004, .09, seaDepth) * (.36 + seaDepth) * mix(1., .55, mirror);
   vec3 raw = texture2D(uPhoto, uv + ripple).rgb;
   float value = dot(raw, vec3(.2126, .7152, .0722));
   vec3 silver = mix(vec3(value), raw, .71);
@@ -119,10 +141,10 @@ void main() {
   color += warm * (mask.r * mix(vec3(.39, .169, .063), vec3(.385, .135, .036), dusk) *
                   (.29 + .71 * skyGlow) + vec3(.21, .073, .01) * silver);
   color += dusk * vec3(.11, -.012, .034) * mask.r * (1. - skyGlow);
-  color += night * mask.r * vec3(.65, .75, 1.) * (stars(uv, t, 31.) * .54 + stars(uv + .013, t, 55.) * .37);
+  color += night * mask.r * vec3(.65, .75, 1.) * starscape(uv, t);
 
   float transit = (t - 6.) / 13.05;
-  vec2 sun = vec2(-.064 + .967 * transit, HORIZON - .438 * sin(transit * 3.14159265));
+  vec2 sun = vec2(-.064 + .967 * transit, horizon - .438 * sin(transit * 3.14159265));
   float sunActive = smoothstep(0., .019, transit) * (1. - smoothstep(.98, 1., transit));
   float dist = length(space(uv - sun));
   float sunDisc = 1. - smoothstep(.013, .0155, dist);
@@ -131,29 +153,43 @@ void main() {
   color += sunColor * (sunDisc * .85 + sunHalo * (.40 + .25 * warm)) * mask.r * sunActive;
   float column = (uv.x - sun.x) / (.012 + seaDepth * .115);
   float glitter = max(0., sin(uv.y * 260. + seaDepth * seaDepth * 390. - tide * 25. + sin(uv.x * 149.)));
+  float sunVisible = mix(1., texture2D(uMask, sun).r, mirror);
   color += sunColor * exp(-column * column) * (.02 + .18 * pow(glitter, 4.)) *
-           (.24 + warm * .76) * mask.g * sunActive * (1. - seaDepth * .68);
+           (.24 + warm * .76) * mask.g * sunActive * (1. - seaDepth * .68) * sunVisible;
 
   float lunarTime = mod(t + 5., 24.) / 10.;
   vec2 moon = vec2(.99 - .19 * lunarTime, .335 - .13 * sin(lunarTime * 2.5));
-  float moonDist = length(space(uv - moon));
-  float moonDisc = 1. - smoothstep(.017, .0185, moonDist);
-  float occlusion = 1. - smoothstep(.0158, .0181, length(space(uv - moon) - vec2(-.008, -.005)));
-  color += night * mask.r * vec3(.74, .83, .97) *
-           (moonDisc * (1. - occlusion) * .77 + exp(-moonDist * 24.) * .13);
+  color += night * mask.r * vec3(.74, .83, .97) * moonlight(uv, moon);
+  if (mirror > 0. && mask.g > .01) {
+    // Water reflects the sky from the time assigned to this point on the lake.
+    vec2 reflected = vec2(uv.x, 2. * horizon - uv.y);
+    reflected.x += sin(uv.y * 145. + uv.x * 27. - tide * 17.) * (.0011 + seaDepth * .0025);
+    reflected.y += sin(uv.y * 310. - tide * 23.) * seaDepth * .0018;
+    float reflectedSky = texture2D(uMask, reflected).r;
+    float gloss = .78 + .22 * sin(uv.y * 180. - tide * 23. + uv.x * 12.);
+    vec3 silverLight = vec3(.54, .73, .95);
+    float moonImage = moonlight(reflected, moon) * .91;
+    float moonPath = exp(-abs(uv.x - moon.x) * 22.) * bell(reflected.y, moon.y, .14) * .037;
+    float starsOnWater = starscape(reflected, t) * .56;
+    color += night * mask.g * reflectedSky * gloss * silverLight * (moonImage + moonPath + starsOnWater);
+    color += mask.g * reflectedSky *
+             (night * vec3(.005, .023, .044) + warm * vec3(.084, .040, .018)) * (.82 - seaDepth * .38);
+  }
 
-  float lampTime = localTime(LANTERN);
-  float lamp = 1. - smoothstep(.03, .48, light(lampTime));
-  vec2 delta = space(uv - LANTERN);
-  float distanceToLamp = length(delta);
-  float beamAngle = .030 + .056 * sin(lampTime * TAU * 6. / 24.);
-  float beamWidth = .004 + abs(delta.x) * .033;
-  float beamShape = bell(delta.y, beamAngle * delta.x, beamWidth);
-  float beam = beamShape * exp(delta.x * 2.1) * (1. - smoothstep(-.002, .004, delta.x));
-  float lampGlow = .77 * exp(-distanceToLamp * 210.) + .24 * exp(-distanceToLamp * 49.);
-  float lampCore = (1. - smoothstep(.0025, .005, distanceToLamp)) * 1.4;
-  color += vec3(1., .659, .352) * lamp *
-           (lampCore + lampGlow + .263 * beam * mask.r * (.24 + night * .76));
+  if (uLantern.z > 0.) {
+    float lampTime = localTime(uLantern.xy);
+    float lamp = 1. - smoothstep(.03, .48, light(lampTime));
+    vec2 delta = space(uv - uLantern.xy);
+    float distanceToLamp = length(delta);
+    float beamAngle = .030 + .056 * sin(lampTime * TAU * 6. / 24.);
+    float beamWidth = .004 + abs(delta.x) * .033;
+    float beamShape = bell(delta.y, beamAngle * delta.x, beamWidth);
+    float beam = beamShape * exp(delta.x * 2.1) * (1. - smoothstep(-.002, .004, delta.x));
+    float lampGlow = .77 * exp(-distanceToLamp * 210.) + .24 * exp(-distanceToLamp * 49.);
+    float lampCore = (1. - smoothstep(.0025, .005, distanceToLamp)) * 1.4;
+    color += vec3(1., .659, .352) * lamp *
+             (lampCore + lampGlow + .263 * beam * mask.r * (.24 + night * .76));
+  }
   float edge = length((uv - .5) * vec2(1., .84));
   color *= 1. - .27 * smoothstep(.19, .67, edge);
   float grain = hash(floor(uv * vec2(1680., 944.))) - .5;
@@ -170,7 +206,7 @@ void main() {
     });
   }
 
-  function createRenderer(canvas, photo, mask) {
+  function createRenderer(canvas, imagesByPlace) {
     const gl = canvas.getContext("webgl", {
       alpha: false, antialias: false, depth: false, premultipliedAlpha: false,
       preserveDrawingBuffer: true, powerPreference: "low-power"
@@ -197,25 +233,43 @@ void main() {
     const attribute = gl.getAttribLocation(program, "aPosition");
     gl.enableVertexAttribArray(attribute);
     gl.vertexAttribPointer(attribute, 2, gl.FLOAT, false, 0, 0);
-    [photo, mask].forEach((image, i) => {
+    function createTexture(image, i) {
       gl.activeTexture(gl.TEXTURE0 + i);
-      gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-      gl.uniform1i(gl.getUniformLocation(program, i === 0 ? "uPhoto" : "uMask"), i);
-    });
+      return texture;
+    }
+    const textures = Object.fromEntries(Object.entries(imagesByPlace)
+      .map(([key, images]) => [key, images.map(createTexture)]));
+    gl.uniform1i(gl.getUniformLocation(program, "uPhoto"), 0);
+    gl.uniform1i(gl.getUniformLocation(program, "uMask"), 1);
     const center = gl.getUniformLocation(program, "uCenter");
     const span = gl.getUniformLocation(program, "uSpan");
     const curve = gl.getUniformLocation(program, "uCurve[0]");
     const axis = gl.getUniformLocation(program, "uDirection");
+    const water = gl.getUniformLocation(program, "uWater");
+    const lantern = gl.getUniformLocation(program, "uLantern");
+    let activePlace;
     return {
       draw(state, width, height) {
         if (canvas.width !== width || canvas.height !== height) {
           canvas.width = width;
           canvas.height = height;
+        }
+        const place = state.place ?? "cape";
+        if (activePlace !== place) {
+          textures[place].forEach((texture, i) => {
+            gl.activeTexture(gl.TEXTURE0 + i);
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+          });
+          gl.uniform2fv(water, PLACES[place].water);
+          gl.uniform3fv(lantern, PLACES[place].lantern);
+          activePlace = place;
         }
         gl.viewport(0, 0, width, height);
         gl.uniform1f(center, state.minute / 60);
@@ -226,5 +280,5 @@ void main() {
       }
     };
   }
-  return {MODES, DAY, clamp, wrapDay, clock, initial, copy, offsetAt, timeAt, positionAt, cleanState, loadImage, createRenderer};
+  return {MODES, PLACES, DAY, clamp, wrapDay, clock, initial, copy, offsetAt, timeAt, positionAt, cleanState, loadImage, createRenderer};
 })();

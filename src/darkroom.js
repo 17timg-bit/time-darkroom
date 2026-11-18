@@ -1,8 +1,9 @@
 "use strict";
 
 const $ = id => document.getElementById(id);
-const {clamp, clock, wrapDay, timeAt} = Optics;
+const {clamp, clock, wrapDay, timeAt, PLACES} = Optics;
 const modeButtons = [...document.querySelectorAll("[data-mode]")];
+const placeButtons = [...document.querySelectorAll("[data-place]")];
 const ticks = [...$("time-scale").children];
 const knots = [...document.querySelectorAll(".knot")];
 const storageKey = "time-darkroom.plates.v1";
@@ -11,9 +12,11 @@ const limit = 12;
 const motion = matchMedia("(prefers-reduced-motion: reduce)");
 const library = [
   {id: "first", title: "一天穿过海岬", state: Optics.initial()},
-  {id: "last", title: "最后一束日光", state: {mode: "still", minute: 1103, span: 1200, curve: [...Optics.MODES.still], angle: 0}},
-  {id: "return", title: "晨昏回环", state: {mode: "fold", minute: 725, span: 1200, curve: [...Optics.MODES.fold], angle: 0}},
-  {id: "tide", title: "海面已经天亮", state: {mode: "scan", minute: 396, span: 900, curve: [...Optics.MODES.scan], angle: 103}}
+  {id: "last", title: "最后一束日光", state: {...Optics.initial(), mode: "still", minute: 1103, curve: [...Optics.MODES.still]}},
+  {id: "return", title: "晨昏回环", state: {...Optics.initial(), mode: "fold", minute: 725, curve: [...Optics.MODES.fold]}},
+  {id: "tide", title: "海面已经天亮", state: {...Optics.initial(), minute: 396, span: 900, angle: 103}},
+  {id: "moon", title: "湖里仍是昨夜", state: {...Optics.initial(), minute: 372, span: 720, angle: 270, place: "lake"}},
+  {id: "peaks", title: "群峰入夜", state: {...Optics.initial(), minute: 1310, span: 480, place: "lake"}}
 ];
 const note = {
   still: "整张照片取自同一分钟。选一颗亮点也能重新展开时间。",
@@ -236,9 +239,32 @@ knots.forEach((node, i) => {
 
 function applyState(next) {
   interruptPlay();
+  const previousPlace = state.place;
   state = Optics.copy(next);
+  if (state.place !== previousPlace) {
+    updatePlace();
+    updateAmbience();
+  }
   updateControls();
   requestDraw();
+}
+
+function updatePlace() {
+  const place = PLACES[state.place];
+  for (const button of placeButtons) {
+    button.setAttribute("aria-pressed", button.dataset.place === state.place);
+  }
+  $("place-number").textContent = place.number;
+  $("scene").setAttribute("aria-label", `${place.title}的分时曝光画面`);
+  $("sound-title").textContent = place.sound;
+}
+
+for (const button of placeButtons) {
+  const place = button.dataset.place;
+  button.querySelector(".location-thumb").style.backgroundImage = `url("${PLACES[place].textures.photo}")`;
+  button.addEventListener("click", () => {
+    if (state.place !== place) applyState({...state, place});
+  });
 }
 
 for (const button of modeButtons) button.addEventListener("click", () => {
@@ -266,7 +292,7 @@ $("finder").addEventListener("pointerleave", () => {
   updateProbe();
 });
 $("show-probe").addEventListener("change", updateProbe);
-$("reset").addEventListener("click", () => applyState(Optics.initial()));
+$("reset").addEventListener("click", () => applyState({...Optics.initial(), place: state.place}));
 $("play").addEventListener("click", togglePlay);
 $("help").addEventListener("click", () => $("manual").showModal());
 $("print").addEventListener("click", makePlate);
@@ -296,11 +322,11 @@ document.addEventListener("keydown", event => {
 
 function openShare() {
   interruptPlay();
-  const {mode, minute, span, curve, angle} = state;
-  const recipe = btoa(JSON.stringify([mode, minute, span, ...curve, angle]))
+  const {mode, minute, span, curve, angle, place} = state;
+  const recipe = btoa(JSON.stringify([mode, minute, span, ...curve, angle, place]))
     .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-  $("share-link").value = `${publicDarkroom}#e=TD1.${recipe}`;
-  $("share-summary").textContent = `${clock(timeAt(state, 0))} → ${clock(timeAt(state, 1))} · 曝光方向 ${angle}°`;
+  $("share-link").value = `${publicDarkroom}#e=TD2.${recipe}`;
+  $("share-summary").textContent = `${PLACES[place].title} · ${clock(timeAt(state, 0))} → ${clock(timeAt(state, 1))} · ${angle}°`;
   $("copy-status").textContent = "";
   $("share-dialog").showModal();
 }
@@ -319,13 +345,17 @@ async function copyShare() {
 
 function loadSharedExposure() {
   if (!location.hash.startsWith("#e=")) return;
-  const match = /^#e=TD1\.([A-Za-z0-9_-]{1,240})$/.exec(location.hash);
+  const match = /^#e=(TD[12])\.([A-Za-z0-9_-]{1,240})$/.exec(location.hash);
   let next = null;
   try {
     if (match) {
-      const parts = JSON.parse(atob(match[1].replaceAll("-", "+").replaceAll("_", "/")));
-      if (Array.isArray(parts) && parts.length === 9 && Number.isFinite(parts[8])) {
-        next = Optics.cleanState({mode: parts[0], minute: parts[1], span: parts[2], curve: parts.slice(3, 8), angle: parts[8]});
+      const oldLink = match[1] === "TD1";
+      const parts = JSON.parse(atob(match[2].replaceAll("-", "+").replaceAll("_", "/")));
+      if (Array.isArray(parts) && parts.length === (oldLink ? 9 : 10) && Number.isFinite(parts[8])) {
+        const place = oldLink ? "cape" : parts[9];
+        if (typeof place === "string") {
+          next = Optics.cleanState({mode: parts[0], minute: parts[1], span: parts[2], curve: parts.slice(3, 8), angle: parts[8], place});
+        }
       }
     }
   } catch {
@@ -399,9 +429,14 @@ function renderShelf() {
     meta.className = "plate-meta";
     const title = document.createElement("h3");
     title.textContent = plate.title;
+    const details = document.createElement("div");
+    details.className = "plate-details";
     const time = document.createElement("time");
     time.textContent = time.dateTime = clock(plate.state.minute);
-    meta.append(title, time);
+    const location = document.createElement("span");
+    location.textContent = PLACES[plate.state.place].title;
+    details.append(location, time);
+    meta.append(title, details);
     const actions = document.createElement("div");
     actions.className = "plate-actions";
     const download = document.createElement("button");
@@ -443,6 +478,7 @@ async function exportPlate(plate) {
   if (!printer || rolling) return;
   rolling = true;
   try {
+    const place = PLACES[plate.state.place];
     const paper = document.createElement("canvas");
     paper.width = 2000;
     paper.height = 1350;
@@ -453,7 +489,7 @@ async function exportPlate(plate) {
     g.fillRect(0, 0, paper.width, paper.height);
     g.fillStyle = "#383129";
     g.font = "600 21px 'Consolas', monospace";
-    g.fillText("TIME DARKROOM   /   THE CAPE LIGHT", x, 77);
+    g.fillText(`TIME DARKROOM   /   ${place.english}`, x, 77);
     g.textAlign = "right";
     g.fillText("24-HOUR EXPOSURE STUDIES", paper.width - x, 77);
     g.textAlign = "left";
@@ -465,7 +501,7 @@ async function exportPlate(plate) {
     g.fillText(plate.title, x, 1231);
     g.font = "19px 'Consolas', monospace";
     g.fillStyle = "#615546";
-    g.fillText(`CAPE LIGHT  /  EXPOSURE ${plate.state.angle}°`, x, 1297);
+    g.fillText(`PLATE ${place.number}  /  EXPOSURE ${plate.state.angle}°`, x, 1297);
     g.strokeStyle = "#8f8070";
     g.beginPath();
     g.moveTo(1432, 1244);
@@ -497,8 +533,8 @@ async function exportPlate(plate) {
   }
 }
 
-function oceanSound() {
-  const audio = new AudioContext();
+function createAmbience(audio, place) {
+  const lake = place === "lake";
   const samples = audio.createBuffer(2, audio.sampleRate * 11, audio.sampleRate);
   for (let channel = 0; channel < samples.numberOfChannels; channel++) {
     const data = samples.getChannelData(channel);
@@ -506,11 +542,13 @@ function oceanSound() {
     for (let i = 0; i < data.length; i++) {
       const noise = Math.random() * 2 - 1;
       low += (noise - low) * .012;
-      mid += (noise - mid) * .112;
+      mid += (noise - mid) * (lake ? .084 : .112);
       const position = i / data.length;
-      const swell = .59 + .28 * Math.cos(position * Math.PI * 4 + .5) + .13 * Math.sin(position * Math.PI * 6);
+      const swell = lake
+        ? .52 + .28 * Math.sin(position * Math.PI * 2 + .4) + .13 * Math.sin(position * Math.PI * 4)
+        : .59 + .28 * Math.cos(position * Math.PI * 4 + .5) + .13 * Math.sin(position * Math.PI * 6);
       const seam = Math.min(1, i / 300, (data.length - 1 - i) / 300);
-      data[i] = (low * .68 + mid * .27) * swell * seam;
+      data[i] = (lake ? low * .26 + (mid - low) * .30 : low * .68 + mid * .27) * swell * seam;
     }
   }
   const waves = audio.createBufferSource();
@@ -520,18 +558,26 @@ function oceanSound() {
   waves.loop = true;
   waves.connect(gain).connect(audio.destination);
   waves.start();
-  return {audio, gain};
+  return gain;
 }
 
 let audioBed;
+function updateAmbience() {
+  if (!audioBed) return;
+  const {audio, tracks} = audioBed;
+  const enabled = $("sound").checked;
+  if (enabled && !tracks.has(state.place)) tracks.set(state.place, createAmbience(audio, state.place));
+  for (const [place, gain] of tracks) {
+    gain.gain.setTargetAtTime(enabled && place === state.place ? .58 : 0, audio.currentTime, .20);
+  }
+}
+
 $("sound").addEventListener("change", async event => {
   const input = event.currentTarget;
   try {
-    if (!audioBed && input.checked) audioBed = oceanSound();
-    if (!audioBed) return;
-    const {audio, gain} = audioBed;
-    if (input.checked) await audio.resume();
-    gain.gain.setTargetAtTime(input.checked ? .58 : 0, audio.currentTime, .16);
+    if (!audioBed && input.checked) audioBed = {audio: new AudioContext(), tracks: new Map()};
+    if (input.checked) await audioBed.audio.resume();
+    updateAmbience();
   } catch (error) {
     console.error(error);
     input.checked = false;
@@ -553,16 +599,21 @@ function unavailable(message) {
 }
 
 async function start() {
+  updatePlace();
   updateControls();
   updateNav();
   loadSharedExposure();
   renderShelf();
   try {
-    const [photo, mask] = await Promise.all([Optics.loadImage(CAPE.photo), Optics.loadImage(CAPE.mask)]);
+    const images = await Promise.all(Object.entries(PLACES).map(async ([id, place]) => {
+      const {photo, mask} = place.textures;
+      return [id, await Promise.all([Optics.loadImage(photo), Optics.loadImage(mask)])];
+    }));
+    const imagesByPlace = Object.fromEntries(images);
     const canvas = $("scene");
     printSurface = document.createElement("canvas");
-    scene = Optics.createRenderer(canvas, photo, mask);
-    printer = Optics.createRenderer(printSurface, photo, mask);
+    scene = Optics.createRenderer(canvas, imagesByPlace);
+    printer = Optics.createRenderer(printSurface, imagesByPlace);
     for (const surface of [canvas, printSurface]) surface.addEventListener("webglcontextlost", () => {
       unavailable("图形上下文已中断，请重新载入暗房。");
     });
