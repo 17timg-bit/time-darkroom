@@ -6,12 +6,14 @@ const modeButtons = [...document.querySelectorAll("[data-mode]")];
 const ticks = [...$("time-scale").children];
 const knots = [...document.querySelectorAll(".knot")];
 const storageKey = "time-darkroom.plates.v1";
+const publicDarkroom = "https://17timg-bit.github.io/time-darkroom/";
 const limit = 12;
 const motion = matchMedia("(prefers-reduced-motion: reduce)");
 const library = [
   {id: "first", title: "一天穿过海岬", state: Optics.initial()},
-  {id: "last", title: "最后一束日光", state: {mode: "still", minute: 1103, span: 1200, curve: [...Optics.MODES.still]}},
-  {id: "return", title: "晨昏回环", state: {mode: "fold", minute: 725, span: 1200, curve: [...Optics.MODES.fold]}}
+  {id: "last", title: "最后一束日光", state: {mode: "still", minute: 1103, span: 1200, curve: [...Optics.MODES.still], angle: 0}},
+  {id: "return", title: "晨昏回环", state: {mode: "fold", minute: 725, span: 1200, curve: [...Optics.MODES.fold], angle: 0}},
+  {id: "tide", title: "海面已经天亮", state: {mode: "scan", minute: 396, span: 900, curve: [...Optics.MODES.scan], angle: 103}}
 ];
 const note = {
   still: "整张照片取自同一分钟。选一颗亮点也能重新展开时间。",
@@ -128,26 +130,35 @@ function drawGraph() {
 }
 
 function updateProbe() {
-  const position = probePosition;
-  $("probe").hidden = position === null || !$("show-probe").checked;
-  if ($("probe").hidden) return;
-  $("probe").style.setProperty("--x", `${100 * position}%`);
-  const width = $("finder").clientWidth;
-  $("probe").style.setProperty("--label-shift", `${clamp(-25, -width * position + 3, width * (1 - position) - 54)}px`);
-  $("probe-time").textContent = clock(timeAt(state, position));
+  const probe = $("probe");
+  probe.hidden = probePosition === null || !$("show-probe").checked;
+  if (probe.hidden) return;
+  const {x, y} = probePosition;
+  const finder = $("finder");
+  const width = finder.clientWidth;
+  probe.style.setProperty("--x", `${100 * x}%`);
+  probe.style.setProperty("--y", `${100 * y}%`);
+  probe.style.setProperty("--cross-angle", `${state.angle + 90}deg`);
+  probe.style.setProperty("--label-shift", `${clamp(-25, -width * x + 3, width * (1 - x) - 54)}px`);
+  probe.style.setProperty("--label-top", y * finder.clientHeight < 34 ? "13px" : "-28px");
+  $("probe-time").textContent = clock(timeAt(state, Optics.positionAt(state.angle, x, y)));
 }
 
 function updateControls() {
   const minute = wrapDay(Math.round(state.minute));
   setRange($("hour"), minute);
   setRange($("span"), state.span);
+  setRange($("angle"), state.angle);
   $("hour-value").textContent = clock(state.minute);
   $("hour").setAttribute("aria-valuetext", clock(state.minute));
   const hours = +(state.span / 60).toFixed(2);
   $("span-value").textContent = `${hours} h`;
   $("span").setAttribute("aria-valuetext", `${hours} 小时`);
+  $("angle-value").textContent = `${state.angle}°`;
+  $("angle").setAttribute("aria-valuetext", `${state.angle} 度`);
+  $("angle-needle").style.setProperty("--angle", `${state.angle}deg`);
   for (const button of modeButtons) button.setAttribute("aria-pressed", button.dataset.mode === state.mode);
-  $("span").disabled = state.mode === "still";
+  $("angle").disabled = $("span").disabled = state.mode === "still";
   $("mode-note").textContent = note[state.mode] ?? "已重新分配照片各处的时间。";
   ticks.forEach((tick, i) => { tick.textContent = clock(timeAt(state, i / 4)); });
   updateProbe();
@@ -234,7 +245,7 @@ for (const button of modeButtons) button.addEventListener("click", () => {
   const mode = button.dataset.mode;
   applyState({...state, mode, curve: [...Optics.MODES[mode]]});
 });
-for (const [id, property] of [["hour", "minute"], ["span", "span"]]) {
+for (const [id, property] of [["hour", "minute"], ["span", "span"], ["angle", "angle"]]) {
   $(id).addEventListener("input", event => {
     interruptPlay();
     state[property] = Number(event.target.value);
@@ -244,7 +255,10 @@ for (const [id, property] of [["hour", "minute"], ["span", "span"]]) {
 }
 $("finder").addEventListener("pointermove", event => {
   const rect = $("finder").getBoundingClientRect();
-  probePosition = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+  probePosition = {
+    x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
+    y: clamp((event.clientY - rect.top) / rect.height, 0, 1)
+  };
   updateProbe();
 });
 $("finder").addEventListener("pointerleave", () => {
@@ -256,6 +270,8 @@ $("reset").addEventListener("click", () => applyState(Optics.initial()));
 $("play").addEventListener("click", togglePlay);
 $("help").addEventListener("click", () => $("manual").showModal());
 $("print").addEventListener("click", makePlate);
+$("share").addEventListener("click", openShare);
+$("copy-link").addEventListener("click", copyShare);
 
 const navLinks = [...document.querySelectorAll("nav a")];
 function updateNav() {
@@ -265,15 +281,63 @@ function updateNav() {
     else link.removeAttribute("aria-current");
   }
 }
-addEventListener("hashchange", updateNav);
+addEventListener("hashchange", () => {
+  updateNav();
+  loadSharedExposure();
+});
 document.addEventListener("keydown", event => {
   if (event.defaultPrevented || event.repeat || event.ctrlKey || event.altKey || event.metaKey ||
-      $("manual").open || event.target.closest("button, input, a")) return;
+      document.querySelector("dialog[open]") || event.target.closest("button, input, a")) return;
   if (event.code === "Space") {
     event.preventDefault();
     togglePlay();
   } else if (event.code === "KeyP") makePlate();
 });
+
+function openShare() {
+  interruptPlay();
+  const {mode, minute, span, curve, angle} = state;
+  const recipe = btoa(JSON.stringify([mode, minute, span, ...curve, angle]))
+    .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  $("share-link").value = `${publicDarkroom}#e=TD1.${recipe}`;
+  $("share-summary").textContent = `${clock(timeAt(state, 0))} → ${clock(timeAt(state, 1))} · 曝光方向 ${angle}°`;
+  $("copy-status").textContent = "";
+  $("share-dialog").showModal();
+}
+
+async function copyShare() {
+  const link = $("share-link");
+  try {
+    await navigator.clipboard.writeText(link.value);
+    $("copy-status").textContent = "曝光链接已复制。";
+  } catch {
+    link.focus();
+    link.select();
+    $("copy-status").textContent = "链接已选中，可用浏览器的复制功能保存。";
+  }
+}
+
+function loadSharedExposure() {
+  if (!location.hash.startsWith("#e=")) return;
+  const match = /^#e=TD1\.([A-Za-z0-9_-]{1,240})$/.exec(location.hash);
+  let next = null;
+  try {
+    if (match) {
+      const parts = JSON.parse(atob(match[1].replaceAll("-", "+").replaceAll("_", "/")));
+      if (Array.isArray(parts) && parts.length === 9 && Number.isFinite(parts[8])) {
+        next = Optics.cleanState({mode: parts[0], minute: parts[1], span: parts[2], curve: parts.slice(3, 8), angle: parts[8]});
+      }
+    }
+  } catch {
+    // A malformed share link has no effect on the current exposure.
+  }
+  if (next) {
+    applyState(next);
+    toast("已载入分享的曝光。");
+  } else {
+    toast("这条曝光链接无法读取。");
+  }
+}
 
 function makePlate() {
   if (!printer) return;
@@ -401,7 +465,7 @@ async function exportPlate(plate) {
     g.fillText(plate.title, x, 1231);
     g.font = "19px 'Consolas', monospace";
     g.fillStyle = "#615546";
-    g.fillText("TIME DARKROOM  /  01", x, 1297);
+    g.fillText(`CAPE LIGHT  /  EXPOSURE ${plate.state.angle}°`, x, 1297);
     g.strokeStyle = "#8f8070";
     g.beginPath();
     g.moveTo(1432, 1244);
@@ -491,6 +555,7 @@ function unavailable(message) {
 async function start() {
   updateControls();
   updateNav();
+  loadSharedExposure();
   renderShelf();
   try {
     const [photo, mask] = await Promise.all([Optics.loadImage(CAPE.photo), Optics.loadImage(CAPE.mask)]);

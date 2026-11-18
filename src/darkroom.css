@@ -59,8 +59,9 @@ h1 span { color: var(--amber); font-family: Georgia, serif; margin-left: .11em; 
 .tr { right: 12px; top: 12px; border-width: 1px 1px 0 0; }
 .bl { left: 12px; bottom: 12px; border-width: 0 0 1px 1px; }
 .br { right: 12px; bottom: 12px; border-width: 0 1px 1px 0; }
-.probe { pointer-events: none; position: absolute; left: var(--x, 50%); top: 0; bottom: 0; border-left: 1px solid #ffe2bdba; }
-.probe span { position: absolute; top: 20px; left: var(--label-shift, -25px); background: #151411e8; color: #ffe7c9; border: 1px solid #ffffff3a; padding: 3px 6px; font: 11px var(--mono); }
+.probe { pointer-events: none; position: absolute; left: var(--x, 50%); top: var(--y, 50%); }
+.probe i { position: absolute; top: 0; left: 0; width: 200vmax; height: 1px; background: #ffe2bdba; transform: translate(-50%, -50%) rotate(var(--cross-angle, 90deg)); }
+.probe span { position: absolute; top: var(--label-top, -28px); left: var(--label-shift, -25px); background: #151411e8; color: #ffe7c9; border: 1px solid #ffffff3a; padding: 3px 6px; font: 11px var(--mono); }
 .flash { position: absolute; inset: 0; pointer-events: none; background: #fff2d9; opacity: 0; }
 .flash.fire { animation: expose .44s ease-out; }
 @keyframes expose { from { opacity: .62; } to { opacity: 0; } }
@@ -84,6 +85,7 @@ button[aria-pressed="true"] .play-glyph { clip-path: polygon(0 0, 32% 0, 32% 100
 .sound-glyph { color: var(--dim); font-size: 15px; }
 .sound:has(:checked) { color: var(--amber); }
 .sound:has(:checked) .sound-glyph { color: inherit; }
+.share-glyph { color: var(--amber); font: 15px/1 var(--mono); }
 .controls { display: flex; flex-direction: column; padding: 18px; gap: 16px; }
 .control-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .control-head h2 { font-size: 16px; font-weight: 600; letter-spacing: .07em; }
@@ -98,6 +100,7 @@ button[aria-pressed="true"] .play-glyph { clip-path: polygon(0 0, 32% 0, 32% 100
 .dial { display: block; }
 .dial-head, .dial-scale, .graph-title { display: flex; justify-content: space-between; align-items: center; }
 .dial-head output { font: 19px/1.15 var(--mono); letter-spacing: -.045em; color: var(--amber); }
+#angle-needle { display: inline-block; font: 17px/1 var(--mono); transform: rotate(var(--angle, 0deg)); }
 .dial-scale { font: 10px/1.15 var(--mono); color: var(--dim); }
 .dial input { --pct: 0%; display: block; appearance: none; background: none; width: 100%; height: 21px; margin: 5px 0 1px; cursor: pointer; }
 .dial input::-webkit-slider-runnable-track { height: 2px; background: linear-gradient(90deg, #ad805c var(--pct), #49453c var(--pct)); }
@@ -144,20 +147,24 @@ dialog p, dialog dd { color: #c6bfb3; font-size: 13px; }
 dialog dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; padding: 12px 0; border-block: 1px solid var(--line); }
 dialog dt { color: var(--amber); }
 dialog dd { margin: 0; }
+.share-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin: 16px 0 9px; }
+.share-row input { min-width: 0; padding: 0 9px; border: 1px solid #574b3d; border-radius: 3px; background: var(--sink); color: var(--ink); font: 12px var(--mono); }
+.share-row .print { min-height: 39px; margin: 0; font-size: 12px; }
+#copy-status { min-height: 1.4em; color: var(--amber); }
 kbd { border: 1px solid #695645; border-radius: 3px; padding: 0 4px; }
 #toast { position: fixed; bottom: 18px; left: 50%; transform: translate(-50%, 12px); width: max-content; max-width: calc(100% - 30px); background: #27221b; border: 1px solid #685440; color: #f1d4b7; padding: 8px 14px; border-radius: 4px; font-size: 12px; z-index: 2; opacity: 0; pointer-events: none; transition: opacity .16s, transform .16s; }
 #toast.visible { opacity: 1; transform: translate(-50%, 0); }
 @media (min-width: 1200px) {
   .workbench { align-items: stretch; }
-  .controls { gap: clamp(17px, 2.05vw, 30px); }
-  .graph { height: 106px; }
+  .controls { gap: clamp(16px, 1.45vw, 23px); }
+  .graph { height: 97px; }
   .print { margin-top: auto; }
 }
 @media (min-width: 701px) and (max-height: 880px) {
   .masthead { padding-top: 19px; padding-bottom: 17px; }
   .workbench { align-items: start; }
-  .controls { gap: 15px; }
-  .graph { height: 82px; }
+  .controls { gap: 12px; }
+  .graph { height: 74px; }
 }
 @media (max-width: 960px) {
   .wrap { width: calc(100% - 40px); }

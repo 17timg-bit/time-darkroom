@@ -6,12 +6,15 @@ const Optics = (() => {
   };
   const DAY = 1440;
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-  const wrapDay = value => ((value % DAY) + DAY) % DAY;
+  const wrapDay = value => {
+    const remainder = value % DAY;
+    return remainder < 0 ? remainder + DAY : remainder;
+  };
   const clock = minutes => {
     const rounded = wrapDay(Math.round(minutes));
     return [Math.floor(rounded / 60), rounded % 60].map(digit => String(digit).padStart(2, "0")).join(":");
   };
-  const initial = () => ({mode: "scan", minute: 995, span: 1200, curve: [...MODES.scan]});
+  const initial = () => ({mode: "scan", minute: 995, span: 1200, curve: [...MODES.scan], angle: 0});
   const copy = state => ({...state, curve: [...state.curve]});
   const offsetAt = (curve, x) => {
     const section = clamp(x, 0, 1) * 4;
@@ -20,13 +23,26 @@ const Optics = (() => {
     return curve[i] * (1 - f) + curve[i + 1] * f;
   };
   const timeAt = (state, x) => state.minute + state.span * offsetAt(state.curve, x);
+  function direction(angle) {
+    const radians = angle * Math.PI / 180;
+    const x = Math.cos(radians) * 16 / 9;
+    const y = Math.sin(radians);
+    const width = Math.abs(x) + Math.abs(y);
+    return [x / width, y / width];
+  }
+  function positionAt(angle, x, y) {
+    const [dx, dy] = direction(angle);
+    return .5 + (x - .5) * dx + (y - .5) * dy;
+  }
   const cleanState = state => {
     if (!state || (state.mode !== "custom" && !Object.hasOwn(MODES, state.mode)) ||
         !Number.isFinite(state.minute) || !Number.isFinite(state.span) ||
         !Array.isArray(state.curve) || state.curve.length !== 5 ||
-        !state.curve.every(Number.isFinite)) return null;
+        !state.curve.every(Number.isFinite) ||
+        !Number.isFinite(state.angle ?? 0)) return null;
     return {mode: state.mode, minute: wrapDay(state.minute), span: clamp(state.span, 30, DAY),
-      curve: state.curve.map(value => clamp(value, -.5, .5))};
+      curve: state.curve.map(value => clamp(value, -.5, .5)),
+      angle: clamp(Math.round(state.angle ?? 0), 0, 359)};
   };
 
   const vertex = `attribute vec2 aPosition;
@@ -40,12 +56,13 @@ void main() {
 varying vec2 uv;
 uniform sampler2D uPhoto, uMask;
 uniform float uCenter, uSpan, uCurve[5];
+uniform vec2 uDirection;
 const float TAU = 6.283185307;
 const float HORIZON = .519;
 const vec2 LANTERN = vec2(.7345, .373);
 
-float localTime(float x) {
-  float i = clamp(x, 0., 1.) * 4.;
+float localTime(vec2 point) {
+  float i = clamp(.5 + dot(point - .5, uDirection), 0., 1.) * 4.;
   float offset;
   if (i < 1.) offset = mix(uCurve[0], uCurve[1], i);
   else if (i < 2.) offset = mix(uCurve[1], uCurve[2], i - 1.);
@@ -77,7 +94,7 @@ float stars(vec2 xy, float t, float cells) {
   return core * smoothstep(.84, .997, star) * blink;
 }
 void main() {
-  float t = localTime(uv.x);
+  float t = localTime(uv);
   float day = light(t);
   float night = 1. - smoothstep(.015, .34, day);
   float dawn = bell(t, 6.4, 1.18);
@@ -125,7 +142,7 @@ void main() {
   color += night * mask.r * vec3(.74, .83, .97) *
            (moonDisc * (1. - occlusion) * .77 + exp(-moonDist * 24.) * .13);
 
-  float lampTime = localTime(LANTERN.x);
+  float lampTime = localTime(LANTERN);
   float lamp = 1. - smoothstep(.03, .48, light(lampTime));
   vec2 delta = space(uv - LANTERN);
   float distanceToLamp = length(delta);
@@ -193,6 +210,7 @@ void main() {
     const center = gl.getUniformLocation(program, "uCenter");
     const span = gl.getUniformLocation(program, "uSpan");
     const curve = gl.getUniformLocation(program, "uCurve[0]");
+    const axis = gl.getUniformLocation(program, "uDirection");
     return {
       draw(state, width, height) {
         if (canvas.width !== width || canvas.height !== height) {
@@ -203,9 +221,10 @@ void main() {
         gl.uniform1f(center, state.minute / 60);
         gl.uniform1f(span, state.span / 60);
         gl.uniform1fv(curve, state.curve);
+        gl.uniform2fv(axis, direction(state.angle));
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       }
     };
   }
-  return {MODES, DAY, clamp, wrapDay, clock, initial, copy, offsetAt, timeAt, cleanState, loadImage, createRenderer};
+  return {MODES, DAY, clamp, wrapDay, clock, initial, copy, offsetAt, timeAt, positionAt, cleanState, loadImage, createRenderer};
 })();
