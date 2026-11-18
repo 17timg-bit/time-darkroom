@@ -24,7 +24,7 @@ const Optics = (() => {
     const rounded = wrapDay(Math.round(minutes));
     return [Math.floor(rounded / 60), rounded % 60].map(digit => String(digit).padStart(2, "0")).join(":");
   };
-  const initial = () => ({mode: "scan", minute: 995, span: 1200, curve: [...MODES.scan], angle: 0, place: "cape"});
+  const initial = () => ({mode: "scan", minute: 995, span: 1200, curve: [...MODES.scan], angle: 0, place: "cape", date: Sky.defaultDate});
   const copy = state => ({...state, curve: [...state.curve]});
   const offsetAt = (curve, x) => {
     const section = clamp(x, 0, 1) * 4;
@@ -50,10 +50,11 @@ const Optics = (() => {
         !Number.isFinite(state.minute) || !Number.isFinite(state.span) ||
         !Array.isArray(state.curve) || state.curve.length !== 5 ||
         !state.curve.every(Number.isFinite) ||
-        !Number.isFinite(state.angle ?? 0) || typeof place !== "string" || !Object.hasOwn(PLACES, place)) return null;
+        !Number.isFinite(state.angle ?? 0) || typeof place !== "string" || !Object.hasOwn(PLACES, place) ||
+        !Sky.validDate(state.date ?? Sky.defaultDate)) return null;
     return {mode: state.mode, minute: wrapDay(state.minute), span: clamp(state.span, 30, DAY),
       curve: state.curve.map(value => clamp(value, -.5, .5)),
-      angle: clamp(Math.round(state.angle ?? 0), 0, 359), place};
+      angle: clamp(Math.round(state.angle ?? 0), 0, 359), place, date: state.date ?? Sky.defaultDate};
   };
 
   const vertex = `attribute vec2 aPosition;
@@ -65,12 +66,20 @@ void main() {
 
   const fragment = `precision highp float;
 varying vec2 uv;
-uniform sampler2D uPhoto, uMask;
+uniform sampler2D uPhoto, uMask, uAtlas;
 uniform float uCenter, uSpan, uCurve[5];
 uniform vec2 uDirection;
 uniform vec2 uWater;
 uniform vec3 uLantern;
+uniform vec3 uCamera;
+uniform vec2 uLatitude;
+uniform float uSidereal;
+uniform mat3 uPrecession;
+uniform vec3 uSolarStart, uSolarEnd;
+uniform vec4 uSun, uMoon, uReflection;
+uniform vec3 uMoonLight, uReflectionLight;
 const float TAU = 6.283185307;
+const float DEG = .01745329251994;
 
 float localTime(vec2 point) {
   float i = clamp(.5 + dot(point - .5, uDirection), 0., 1.) * 4.;
@@ -79,14 +88,25 @@ float localTime(vec2 point) {
   else if (i < 2.) offset = mix(uCurve[1], uCurve[2], i - 1.);
   else if (i < 3.) offset = mix(uCurve[2], uCurve[3], i - 2.);
   else offset = mix(uCurve[3], uCurve[4], i - 3.);
-  return mod(uCenter + uSpan * offset, 24.);
+  return uCenter + uSpan * offset;
 }
 float bell(float a, float center, float width) {
   float q = (a - center) / width;
   return exp(-q * q);
 }
-float light(float hour) {
-  return smoothstep(5.0, 8.4, hour) * (1. - smoothstep(16.9, 20.5, hour));
+float spin(float hour) {
+  return uSidereal + hour * TAU * 1.00273790935 / 24.;
+}
+vec3 solarDirection(float hour) {
+  vec3 sun = normalize(mix(uSolarStart, uSolarEnd, clamp((hour+12.)/48.,0.,1.)));
+  float s = spin(hour);
+  float meridian = sun.x * cos(s) + sun.y * sin(s);
+  return vec3(sun.y * cos(s) - sun.x * sin(s),
+    sun.z * uLatitude.y - meridian * uLatitude.x,
+    sun.z * uLatitude.x + meridian * uLatitude.y);
+}
+float daylight(float solarAlt) {
+  return smoothstep(sin(-9.*DEG), sin(14.*DEG), solarAlt);
 }
 float hash(vec2 p) {
   vec3 a = fract(vec3(p.xyx) * .1031);
@@ -94,35 +114,40 @@ float hash(vec2 p) {
   return fract((a.x + a.y) * a.z);
 }
 vec2 space(vec2 p) { return p * vec2(1.7777778, 1.); }
-float stars(vec2 xy, float t, float cells) {
-  vec2 coord = space(xy) * cells;
-  vec2 grid = floor(coord);
-  float star = hash(grid);
-  vec2 spot = .18 + vec2(hash(grid + 7.3), hash(grid - 3.9)) * .64;
-  float dist = length(fract(coord) - spot);
-  float core = 1. - smoothstep(.018, .063, dist);
-  float blink = .8 + .2 * cos(star * 140. + t * TAU * 5. / 24.);
-  return core * smoothstep(.84, .997, star) * blink;
+vec3 cameraRay(vec2 point, float horizon) {
+  vec2 right = vec2(uCamera.y, -uCamera.x);
+  return normalize(vec3(uCamera.xy + (2.*point.x - 1.) * uCamera.z * right,
+    (horizon - point.y) * 1.125 * uCamera.z));
 }
-float starscape(vec2 xy, float t) {
-  return stars(xy, t, 31.) * .54 + stars(xy + .013, t, 55.) * .37;
+vec3 starscape(vec3 ray, float hour) {
+  float s = spin(hour);
+  float meridian = uLatitude.y * ray.z - uLatitude.x * ray.y;
+  vec3 eq = uPrecession * vec3(meridian * cos(s) - ray.x * sin(s),
+    meridian * sin(s) + ray.x * cos(s), uLatitude.x * ray.z + uLatitude.y * ray.y);
+  vec2 uvStar = vec2(fract(atan(eq.y, eq.x)/TAU + 1.), .5 - asin(clamp(eq.z,-1.,1.))/(.5*TAU));
+  return texture2D(uAtlas, uvStar).rgb * smoothstep(-.006,.18,ray.z);
 }
-float moonlight(vec2 xy, vec2 moon) {
-  float distanceToMoon = length(space(xy - moon));
-  float disc = 1. - smoothstep(.017, .0185, distanceToMoon);
-  float occlusion = 1. - smoothstep(.0158, .0181, length(space(xy - moon) - vec2(-.008, -.005)));
-  return disc * (1. - occlusion) * .77 + exp(-distanceToMoon * 24.) * .13;
+float moondisc(vec3 ray, vec4 body, vec3 light) {
+  if (body.w <= 0.) return 0.;
+  float aligned = dot(ray, body.xyz);
+  if (aligned < .9995) return 0.;
+  vec3 tangent = (ray - aligned * body.xyz) / body.w;
+  float r = length(tangent);
+  vec3 surface = tangent - body.xyz * sqrt(max(0., 1. - r*r));
+  float phase = pow(max(0.,dot(surface, light)), .45);
+  return (1. - smoothstep(.77, 1.19, r)) * (.013 + .84*phase);
 }
 void main() {
   float t = localTime(uv);
-  float day = light(t);
-  float night = 1. - smoothstep(.015, .34, day);
-  float dawn = bell(t, 6.4, 1.18);
-  float dusk = bell(t, 18.45, 1.17);
-  float warm = dawn + dusk;
+  vec3 solar = solarDirection(t);
+  float solarAlt = solar.z;
+  float day = daylight(solarAlt);
+  float night = 1. - smoothstep(sin(-18.*DEG), sin(-6.*DEG), solarAlt);
+  float warm = bell(solarAlt, sin(-2.*DEG), .098);
   float horizon = uWater.x;
   float mirror = uWater.y;
   float skyGlow = bell(uv.y, horizon - .04, .34);
+  vec3 ray = cameraRay(uv, horizon);
   vec2 mask = texture2D(uMask, uv).rg;
   float seaDepth = clamp((uv.y - horizon) * 2.08, 0., 1.);
   float tide = t * TAU / 24.;
@@ -138,28 +163,28 @@ void main() {
   vec3 nightTone = silver * vec3(.15, .208, .319) + vec3(.007, .011, .022);
   nightTone += mask.r * vec3(.016, .013, .032) * skyGlow;
   vec3 color = mix(nightTone, dayTone, day);
-  color += warm * (mask.r * mix(vec3(.39, .169, .063), vec3(.385, .135, .036), dusk) *
-                  (.29 + .71 * skyGlow) + vec3(.21, .073, .01) * silver);
-  color += dusk * vec3(.11, -.012, .034) * mask.r * (1. - skyGlow);
-  color += night * mask.r * vec3(.65, .75, 1.) * starscape(uv, t);
+  float solarSide = .36 + .64 * pow(max(0.,dot(normalize(ray.xy),normalize(solar.xy))),2.);
+  color += warm * solarSide * (mask.r * vec3(.38, .186, .103) * (.24 + .76 * skyGlow)
+                         + vec3(.17, .084, .022) * silver);
+  if (night > .001 && mask.r > .001) color += night * mask.r * starscape(ray, t);
 
-  float transit = (t - 6.) / 13.05;
-  vec2 sun = vec2(-.064 + .967 * transit, horizon - .438 * sin(transit * 3.14159265));
-  float sunActive = smoothstep(0., .019, transit) * (1. - smoothstep(.98, 1., transit));
-  float dist = length(space(uv - sun));
-  float sunDisc = 1. - smoothstep(.013, .0155, dist);
-  float sunHalo = exp(-dist * 22.) * .72 + exp(-dist * 7.5) * .20;
-  vec3 sunColor = mix(vec3(1., .88, .66), vec3(1., .54, .22), warm * .68);
-  color += sunColor * (sunDisc * .85 + sunHalo * (.40 + .25 * warm)) * mask.r * sunActive;
-  float column = (uv.x - sun.x) / (.012 + seaDepth * .115);
-  float glitter = max(0., sin(uv.y * 260. + seaDepth * seaDepth * 390. - tide * 25. + sin(uv.x * 149.)));
-  float sunVisible = mix(1., texture2D(uMask, sun).r, mirror);
-  color += sunColor * exp(-column * column) * (.02 + .18 * pow(glitter, 4.)) *
-           (.24 + warm * .76) * mask.g * sunActive * (1. - seaDepth * .68) * sunVisible;
-
-  float lunarTime = mod(t + 5., 24.) / 10.;
-  vec2 moon = vec2(.99 - .19 * lunarTime, .335 - .13 * sin(lunarTime * 2.5));
-  color += night * mask.r * vec3(.74, .83, .97) * moonlight(uv, moon);
+  float sunHeight = uSun.z;
+  vec3 sunColor = mix(vec3(1.,.96,.86), vec3(1.,.48,.20), 1. - smoothstep(0.,.19,sunHeight));
+  if (uSun.w > 0. && mask.r > .001) {
+    float distanceToSun = length(ray - uSun.xyz);
+    float disc = 1. - smoothstep(uSun.w * .70, uSun.w * 1.21, distanceToSun);
+    float halo = exp(-distanceToSun * 86.) * .19 + exp(-distanceToSun * 26.) * .05;
+    color += mask.r * sunColor * (disc*.91 + halo);
+  }
+  if (mask.g > .001 && solarAlt > -.008) {
+    float towardSun = length(normalize(ray.xy) - normalize(solar.xy));
+    float glitter = max(0., sin(uv.y * 260. + seaDepth * seaDepth * 390. - tide * 25. + sin(uv.x * 149.)));
+    color += (vec3(.62,.56,.49) + vec3(.28,-.12,-.28)*warm) *
+      bell(towardSun,0.,.024+seaDepth*.09) * glitter*glitter * mask.g *
+      bell(solarAlt,.02,.16) * .062 * (1.-mirror*.45);
+  }
+  color += mask.r * mix(vec3(.89,.92,.99), vec3(.50,.57,.65),day) *
+           moondisc(ray, uMoon, uMoonLight) * (1.-day*.55);
   if (mirror > 0. && mask.g > .01) {
     // Water reflects the sky from the time assigned to this point on the lake.
     vec2 reflected = vec2(uv.x, 2. * horizon - uv.y);
@@ -168,17 +193,17 @@ void main() {
     float reflectedSky = texture2D(uMask, reflected).r;
     float gloss = .78 + .22 * sin(uv.y * 180. - tide * 23. + uv.x * 12.);
     vec3 silverLight = vec3(.54, .73, .95);
-    float moonImage = moonlight(reflected, moon) * .91;
-    float moonPath = exp(-abs(uv.x - moon.x) * 22.) * bell(reflected.y, moon.y, .14) * .037;
-    float starsOnWater = starscape(reflected, t) * .56;
-    color += night * mask.g * reflectedSky * gloss * silverLight * (moonImage + moonPath + starsOnWater);
+    vec3 reflectedRay = cameraRay(reflected, horizon);
+    float moonImage = moondisc(reflectedRay,uReflection,uReflectionLight);
+    vec3 starsOnWater = starscape(reflectedRay,t) * night * .47;
+    color += mask.g * reflectedSky * gloss * (silverLight * moonImage * (1.-day*.79) + starsOnWater);
     color += mask.g * reflectedSky *
              (night * vec3(.005, .023, .044) + warm * vec3(.084, .040, .018)) * (.82 - seaDepth * .38);
   }
 
   if (uLantern.z > 0.) {
     float lampTime = localTime(uLantern.xy);
-    float lamp = 1. - smoothstep(.03, .48, light(lampTime));
+    float lamp = 1. - smoothstep(-.11, .02, solarDirection(lampTime).z);
     vec2 delta = space(uv - uLantern.xy);
     float distanceToLamp = length(delta);
     float beamAngle = .030 + .056 * sin(lampTime * TAU * 6. / 24.);
@@ -206,7 +231,7 @@ void main() {
     });
   }
 
-  function createRenderer(canvas, imagesByPlace) {
+  function createRenderer(canvas, imagesByPlace, starAtlas) {
     const gl = canvas.getContext("webgl", {
       alpha: false, antialias: false, depth: false, premultipliedAlpha: false,
       preserveDrawingBuffer: true, powerPreference: "low-power"
@@ -246,15 +271,29 @@ void main() {
     }
     const textures = Object.fromEntries(Object.entries(imagesByPlace)
       .map(([key, images]) => [key, images.map(createTexture)]));
+    createTexture(starAtlas, 2);
     gl.uniform1i(gl.getUniformLocation(program, "uPhoto"), 0);
     gl.uniform1i(gl.getUniformLocation(program, "uMask"), 1);
+    gl.uniform1i(gl.getUniformLocation(program, "uAtlas"), 2);
     const center = gl.getUniformLocation(program, "uCenter");
     const span = gl.getUniformLocation(program, "uSpan");
     const curve = gl.getUniformLocation(program, "uCurve[0]");
     const axis = gl.getUniformLocation(program, "uDirection");
     const water = gl.getUniformLocation(program, "uWater");
     const lantern = gl.getUniformLocation(program, "uLantern");
+    const solarDisc = gl.getUniformLocation(program, "uSun");
+    const lunarDisc = gl.getUniformLocation(program, "uMoon");
+    const reflection = gl.getUniformLocation(program, "uReflection");
+    const moonLight = gl.getUniformLocation(program, "uMoonLight");
+    const reflectionLight = gl.getUniformLocation(program, "uReflectionLight");
+    const camera = gl.getUniformLocation(program, "uCamera");
+    const latitude = gl.getUniformLocation(program, "uLatitude");
+    const sidereal = gl.getUniformLocation(program, "uSidereal");
+    const precession = gl.getUniformLocation(program, "uPrecession");
+    const solarStart = gl.getUniformLocation(program, "uSolarStart");
+    const solarEnd = gl.getUniformLocation(program, "uSolarEnd");
     let activePlace;
+    let activeSky;
     return {
       draw(state, width, height) {
         if (canvas.width !== width || canvas.height !== height) {
@@ -270,6 +309,24 @@ void main() {
           gl.uniform2fv(water, PLACES[place].water);
           gl.uniform3fv(lantern, PLACES[place].lantern);
           activePlace = place;
+        }
+        const sky = Sky.observe(place, state.date ?? Sky.defaultDate);
+        if (sky !== activeSky) {
+          gl.uniform3fv(camera, [...sky.forward.slice(0,2), sky.tangent]);
+          gl.uniform2fv(latitude, sky.latitude);
+          gl.uniform1f(sidereal, sky.sidereal);
+          gl.uniformMatrix3fv(precession, false, sky.precession);
+          gl.uniform3fv(solarStart, sky.sunStart);
+          gl.uniform3fv(solarEnd, sky.sunEnd);
+          activeSky = sky;
+        }
+        const bodies = Sky.frame(sky, state, PLACES[place].water);
+        gl.uniform4fv(solarDisc, bodies.sun.disc);
+        gl.uniform4fv(lunarDisc, bodies.moon.disc);
+        gl.uniform3fv(moonLight, bodies.moon.light);
+        if (bodies.reflection) {
+          gl.uniform4fv(reflection, bodies.reflection.disc);
+          gl.uniform3fv(reflectionLight, bodies.reflection.light);
         }
         gl.viewport(0, 0, width, height);
         gl.uniform1f(center, state.minute / 60);

@@ -12,10 +12,10 @@ const limit = 12;
 const motion = matchMedia("(prefers-reduced-motion: reduce)");
 const library = [
   {id: "first", title: "一天穿过海岬", state: Optics.initial()},
-  {id: "last", title: "最后一束日光", state: {...Optics.initial(), mode: "still", minute: 1103, curve: [...Optics.MODES.still]}},
+  {id: "last", title: "最后一束日光", state: {...Optics.initial(), mode: "still", minute: 955, curve: [...Optics.MODES.still]}},
   {id: "return", title: "晨昏回环", state: {...Optics.initial(), mode: "fold", minute: 725, curve: [...Optics.MODES.fold]}},
   {id: "tide", title: "海面已经天亮", state: {...Optics.initial(), minute: 396, span: 900, angle: 103}},
-  {id: "moon", title: "湖里仍是昨夜", state: {...Optics.initial(), minute: 372, span: 720, angle: 270, place: "lake"}},
+  {id: "moon", title: "湖里仍是昨夜", state: {...Optics.initial(), minute: 510, span: 720, angle: 250, place: "lake", date: "2027-01-01"}},
   {id: "peaks", title: "群峰入夜", state: {...Optics.initial(), minute: 1310, span: 480, place: "lake"}}
 ];
 const note = {
@@ -163,7 +163,12 @@ function updateControls() {
   for (const button of modeButtons) button.setAttribute("aria-pressed", button.dataset.mode === state.mode);
   $("angle").disabled = $("span").disabled = state.mode === "still";
   $("mode-note").textContent = note[state.mode] ?? "已重新分配照片各处的时间。";
-  ticks.forEach((tick, i) => { tick.textContent = clock(timeAt(state, i / 4)); });
+  $("current-date").textContent = state.date;
+  ticks.forEach((tick, i) => {
+    const local = timeAt(state, i / 4);
+    tick.textContent = clock(local);
+    tick.title = `${Sky.advanceDate(state.date, Math.floor((local+.5) / Optics.DAY))} ${tick.textContent}`;
+  });
   updateProbe();
   drawGraph();
 }
@@ -174,7 +179,18 @@ function requestDraw() {
 
 function drawFrame(now) {
   frame = 0;
-  if (playing && lastFrame && !document.hidden) state.minute = wrapDay(state.minute + Math.min(100, now - lastFrame) * .033);
+  if (playing && lastFrame && !document.hidden) {
+    state.minute += Math.min(100, now - lastFrame) * .033;
+    if (state.minute >= Optics.DAY) {
+      if (state.date === Sky.lastDate) {
+        state.minute = Optics.DAY - 1;
+        interruptPlay();
+      } else {
+        state.minute = wrapDay(state.minute);
+        state.date = Sky.advanceDate(state.date, 1);
+      }
+    }
+  }
   lastFrame = now;
   if (scene) {
     const density = Math.min(devicePixelRatio || 1, 1.6);
@@ -254,7 +270,6 @@ function updatePlace() {
   for (const button of placeButtons) {
     button.setAttribute("aria-pressed", button.dataset.place === state.place);
   }
-  $("place-number").textContent = place.number;
   $("scene").setAttribute("aria-label", `${place.title}的分时曝光画面`);
   $("sound-title").textContent = place.sound;
 }
@@ -292,9 +307,23 @@ $("finder").addEventListener("pointerleave", () => {
   updateProbe();
 });
 $("show-probe").addEventListener("change", updateProbe);
-$("reset").addEventListener("click", () => applyState({...Optics.initial(), place: state.place}));
+$("reset").addEventListener("click", () => applyState({...Optics.initial(), place: state.place, date: state.date}));
 $("play").addEventListener("click", togglePlay);
 $("help").addEventListener("click", () => $("manual").showModal());
+$("sky-details").addEventListener("click", () => {
+  interruptPlay();
+  updateSkyDialog();
+  $("sky-dialog").showModal();
+});
+$("observation-date").addEventListener("change", event => {
+  const control = event.currentTarget;
+  if (Sky.validDate(control.value)) {
+    applyState({...state, date: control.value});
+    updateSkyDialog();
+  } else {
+    control.value = state.date;
+  }
+});
 $("print").addEventListener("click", makePlate);
 $("share").addEventListener("click", openShare);
 $("copy-link").addEventListener("click", copyShare);
@@ -320,13 +349,30 @@ document.addEventListener("keydown", event => {
   } else if (event.code === "KeyP") makePlate();
 });
 
+function updateSkyDialog() {
+  const observation = Sky.observe(state.place, state.date);
+  const {site} = observation;
+  const e = Sky.events(observation);
+  const now = Sky.snapshot(observation, state.minute);
+  const bearing = `${site.bearing}°`;
+  $("observation-date").value = state.date;
+  $("sky-location").textContent = `${PLACES[state.place].title} · ${site.lat.toFixed(2)}°N ${Math.abs(site.lon).toFixed(2)}°${site.lon < 0 ? "W" : "E"} · UTC+${site.utc} · 朝向 ${bearing}`;
+  for (const id of ["sunrise","sunset","moonrise","moonset"]) {
+    $(id).textContent = e[id] ? `${clock(e[id].minute)} · ${Math.round(e[id].azimuth)}°` : "当日无";
+  }
+  const degrees = value => `${value < 0 ? "−" : ""}${Math.abs(value).toFixed(1)}°`;
+  $("sky-altitude").textContent = `${clock(state.minute)} 高度角 · 日 ${degrees(now.sun.altitude)} / 月 ${degrees(now.moon.altitude)}`;
+  $("moon-phase").textContent = `${now.phase} · 照明 ${Math.round(now.fraction*100)}%`;
+  Sky.drawPhase($("moon-preview"), observation, state.minute, now);
+}
+
 function openShare() {
   interruptPlay();
-  const {mode, minute, span, curve, angle, place} = state;
-  const recipe = btoa(JSON.stringify([mode, minute, span, ...curve, angle, place]))
+  const {mode, minute, span, curve, angle, place, date} = state;
+  const recipe = btoa(JSON.stringify([mode, minute, span, ...curve, angle, place, date]))
     .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-  $("share-link").value = `${publicDarkroom}#e=TD2.${recipe}`;
-  $("share-summary").textContent = `${PLACES[place].title} · ${clock(timeAt(state, 0))} → ${clock(timeAt(state, 1))} · ${angle}°`;
+  $("share-link").value = `${publicDarkroom}#e=TD3.${recipe}`;
+  $("share-summary").textContent = `${PLACES[place].title} · ${date} · ${clock(timeAt(state, 0))} → ${clock(timeAt(state, 1))} · ${angle}°`;
   $("copy-status").textContent = "";
   $("share-dialog").showModal();
 }
@@ -345,16 +391,17 @@ async function copyShare() {
 
 function loadSharedExposure() {
   if (!location.hash.startsWith("#e=")) return;
-  const match = /^#e=(TD[12])\.([A-Za-z0-9_-]{1,240})$/.exec(location.hash);
+  const match = /^#e=(TD[123])\.([A-Za-z0-9_-]{1,240})$/.exec(location.hash);
   let next = null;
   try {
     if (match) {
-      const oldLink = match[1] === "TD1";
+      const version = Number(match[1].at(-1));
       const parts = JSON.parse(atob(match[2].replaceAll("-", "+").replaceAll("_", "/")));
-      if (Array.isArray(parts) && parts.length === (oldLink ? 9 : 10) && Number.isFinite(parts[8])) {
-        const place = oldLink ? "cape" : parts[9];
-        if (typeof place === "string") {
-          next = Optics.cleanState({mode: parts[0], minute: parts[1], span: parts[2], curve: parts.slice(3, 8), angle: parts[8], place});
+      if (Array.isArray(parts) && parts.length === 8 + version && Number.isFinite(parts[8])) {
+        const place = version === 1 ? "cape" : parts[9];
+        const date = version < 3 ? Sky.defaultDate : parts[10];
+        if (typeof place === "string" && Sky.validDate(date)) {
+          next = Optics.cleanState({mode: parts[0], minute: parts[1], span: parts[2], curve: parts.slice(3, 8), angle: parts[8], place, date});
         }
       }
     }
@@ -491,7 +538,7 @@ async function exportPlate(plate) {
     g.font = "600 21px 'Consolas', monospace";
     g.fillText(`TIME DARKROOM   /   ${place.english}`, x, 77);
     g.textAlign = "right";
-    g.fillText("24-HOUR EXPOSURE STUDIES", paper.width - x, 77);
+    g.fillText(`${plate.state.date}   /   UTC+${Sky.SITES[plate.state.place].utc}`, paper.width - x, 77);
     g.textAlign = "left";
     g.drawImage(printSurface, x, y, width, height);
     g.strokeStyle = "#39332a";
@@ -605,15 +652,17 @@ async function start() {
   loadSharedExposure();
   renderShelf();
   try {
-    const images = await Promise.all(Object.entries(PLACES).map(async ([id, place]) => {
+    const sceneImages = Promise.all(Object.entries(PLACES).map(async ([id, place]) => {
       const {photo, mask} = place.textures;
       return [id, await Promise.all([Optics.loadImage(photo), Optics.loadImage(mask)])];
     }));
+    const [images, atlas] = await Promise.all([sceneImages, Optics.loadImage(SKY_STARS), Sky.loadMoonMap()]);
     const imagesByPlace = Object.fromEntries(images);
     const canvas = $("scene");
     printSurface = document.createElement("canvas");
-    scene = Optics.createRenderer(canvas, imagesByPlace);
-    printer = Optics.createRenderer(printSurface, imagesByPlace);
+    scene = Optics.createRenderer(canvas, imagesByPlace, atlas);
+    printer = Optics.createRenderer(printSurface, imagesByPlace, atlas);
+    if ($("sky-dialog").open) updateSkyDialog();
     for (const surface of [canvas, printSurface]) surface.addEventListener("webglcontextlost", () => {
       unavailable("图形上下文已中断，请重新载入暗房。");
     });
