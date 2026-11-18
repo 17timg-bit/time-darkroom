@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#141412">
+  <title>时间暗房 · Time Darkroom</title>
+  <link rel="stylesheet" href="src/darkroom.css">
+  <script defer src="assets/cape.js"></script>
+  <script defer src="src/optics.js"></script>
+  <script defer src="src/darkroom.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap top-inner">
+      <div class="wordmark"><span class="iris" aria-hidden="true"></span><span>TIME<br>DARKROOM</span></div>
+      <nav aria-label="页面导航">
+        <a href="#darkroom" aria-current="page">暗房</a>
+        <a href="#shelf">底片夹<span id="shelf-count" class="nav-count">03</span></a>
+      </nav>
+      <button id="help" class="quiet help" type="button" aria-label="打开使用说明"><span aria-hidden="true">?</span> <span>使用说明</span></button>
+    </div>
+  </header>
+  <main class="wrap">
+    <section id="darkroom" aria-labelledby="title">
+      <div class="masthead">
+        <div>
+          <h1 id="title">时间暗房<span aria-hidden="true">.</span></h1>
+          <p>同一个地方，可以同时存在于好几个时刻。</p>
+        </div>
+        <div class="location"><span class="location-dot" aria-hidden="true"></span><span>岬角灯塔<small>THE CAPE LIGHT</small></span></div>
+      </div>
+      <div class="workbench">
+        <section class="viewer" aria-label="曝光预览">
+          <div class="film-label"><span><i></i> <span id="view-status">静止曝光</span></span><span>虚构景片 <b>·</b> 01</span></div>
+          <div id="finder" class="finder">
+            <canvas id="scene" aria-label="岬角灯塔，同一画面的各个位置来自不同时间"></canvas>
+            <div class="loading" id="loading" role="status">正在装入底片…</div>
+            <div class="frame-mark tl"></div><div class="frame-mark tr"></div>
+            <div class="frame-mark bl"></div><div class="frame-mark br"></div>
+            <div class="probe" id="probe" hidden><span id="probe-time"></span></div>
+            <div class="flash" id="flash" hidden></div>
+          </div>
+          <div class="time-scale" id="time-scale" aria-label="画面横向取样时刻">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div class="deck">
+            <div class="deck-buttons">
+              <button id="play" class="quiet" type="button" aria-pressed="false"><span class="play-glyph" aria-hidden="true"></span><span id="play-label">让时间流动</span></button>
+              <label class="sound quiet"><input type="checkbox" id="sound"><span class="sound-glyph" aria-hidden="true">♩</span><span>海声</span></label>
+            </div>
+            <p>在取景框上移动，查看局部时间</p>
+          </div>
+        </section>
+        <aside class="controls" aria-labelledby="control-title">
+          <div class="control-head"><h2 id="control-title">曝光控制</h2><button id="reset" class="quiet reset" type="button">复位</button></div>
+          <fieldset class="modes">
+            <legend>曝光方式</legend>
+            <div class="segments">
+              <button type="button" data-mode="still" aria-pressed="false">同刻</button>
+              <button type="button" data-mode="scan" aria-pressed="true">扫过</button>
+              <button type="button" data-mode="fold" aria-pressed="false">折回</button>
+            </div>
+          </fieldset>
+          <label class="dial" for="hour"><span class="dial-head">中心时刻 <output id="hour-value" for="hour"></output></span>
+            <input type="range" id="hour" value="995" min="0" max="1439">
+            <span class="dial-scale"><span>00:00</span><span>12:00</span><span>24:00</span></span>
+          </label>
+          <label class="dial" for="span"><span class="dial-head">时间跨度 <output id="span-value" for="span"></output></span>
+            <input type="range" id="span" value="1200" min="30" max="1440" step="15">
+            <span class="dial-scale"><span>0.5 小时</span><span>24 小时</span></span>
+          </label>
+          <div class="graph-controls">
+            <div class="graph-title"><span>横向时间曲线</span><label class="probe-toggle"><input type="checkbox" id="show-probe" checked>取样线</label></div>
+            <div id="graph" class="graph" aria-label="图片从左到右的取样时间，拖动节点可重新分配时间">
+              <canvas id="graph-ink" aria-hidden="true"></canvas>
+              <button class="knot" role="slider" type="button" aria-label="照片最左侧时间偏移"></button>
+              <button class="knot" role="slider" type="button" aria-label="照片左侧四分之一时间偏移"></button>
+              <button class="knot" role="slider" type="button" aria-label="照片中央时间偏移"></button>
+              <button class="knot" role="slider" type="button" aria-label="照片右侧四分之一时间偏移"></button>
+              <button class="knot" role="slider" type="button" aria-label="照片最右侧时间偏移"></button>
+            </div>
+            <p class="graph-note" id="mode-note">拖动亮点，让光线在不同位置先后抵达。</p>
+          </div>
+          <button id="print" class="print" type="button" disabled><span>冲印底片</span><span class="print-symbol" aria-hidden="true">↗</span></button>
+        </aside>
+      </div>
+    </section>
+    <section class="shelf" id="shelf" aria-labelledby="shelf-title">
+      <div class="shelf-head"><div><h2 id="shelf-title">底片夹</h2><p>打开一张底片，就能回到它的时间。</p></div><span id="shelf-tally"></span></div>
+      <div id="plates" class="plates"></div>
+    </section>
+    <footer><span>TIME DARKROOM</span><span>岬角灯塔 · 一次跨越整日的曝光</span></footer>
+  </main>
+  <dialog id="manual">
+    <form method="dialog"><button class="quiet close" value="close" aria-label="关闭说明">×</button></form>
+    <h2>在暗房里折叠一天</h2>
+    <p>照片的每一列都能取自不同的时刻。取景框下方的五个刻度显示这些时刻。</p>
+    <dl>
+      <dt>同刻</dt><dd>整张照片来自同一分钟。用它观察灯塔从破晓到入夜。</dd>
+      <dt>扫过</dt><dd>从照片左侧走向右侧，时间向前推进。</dd>
+      <dt>折回</dt><dd>时间从两侧向中间推进，再向外折返。</dd>
+    </dl>
+    <p>拖动任意曲线节点，或用键盘方向键微调。<kbd>空格</kbd> 播放或暂停，<kbd>P</kbd> 冲印。冲印后可以从底片夹导出 PNG。</p>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
