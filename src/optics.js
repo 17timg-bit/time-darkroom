@@ -46,15 +46,17 @@ const Optics = (() => {
   }
   const cleanState = state => {
     const place = state?.place ?? "cape";
+    const field = place === "field" ? Field.validate(state?.field) : null;
     if (!state || (state.mode !== "custom" && !Object.hasOwn(MODES, state.mode)) ||
         !Number.isFinite(state.minute) || !Number.isFinite(state.span) ||
         !Array.isArray(state.curve) || state.curve.length !== 5 ||
         !state.curve.every(Number.isFinite) ||
-        !Number.isFinite(state.angle ?? 0) || typeof place !== "string" || !Object.hasOwn(PLACES, place) ||
+        !Number.isFinite(state.angle ?? 0) || typeof place !== "string" || (!field && !Object.hasOwn(PLACES, place)) ||
         !Sky.validDate(state.date ?? Sky.defaultDate)) return null;
     return {mode: state.mode, minute: wrapDay(state.minute), span: clamp(state.span, 30, DAY),
       curve: state.curve.map(value => clamp(value, -.5, .5)),
-      angle: clamp(Math.round(state.angle ?? 0), 0, 359), place, date: state.date ?? Sky.defaultDate};
+      angle: clamp(Math.round(state.angle ?? 0), 0, 359), place, date: state.date ?? Sky.defaultDate,
+      ...(field ? {field} : {})};
   };
 
   const vertex = `attribute vec2 aPosition;
@@ -78,6 +80,10 @@ uniform mat3 uPrecession;
 uniform vec3 uSolarStart, uSolarEnd;
 uniform vec4 uSun, uMoon, uReflection;
 uniform vec3 uMoonLight, uReflectionLight;
+uniform sampler2D uReel;
+uniform int uFrameCount, uCut;
+uniform vec2 uGrid, uTileInset;
+uniform float uFrameTimes[6], uLastFrameTime;
 const float TAU = 6.283185307;
 const float DEG = .01745329251994;
 
@@ -137,8 +143,45 @@ float moondisc(vec3 ray, vec4 body, vec3 light) {
   float phase = pow(max(0.,dot(surface, light)), .45);
   return (1. - smoothstep(.77, 1.19, r)) * (.013 + .84*phase);
 }
+vec3 reelTile(vec2 point, float number) {
+  vec2 tile = vec2(mod(number,uGrid.x),floor(number/uGrid.x));
+  vec2 centreSafe = mix(uTileInset,1.-uTileInset,point);
+  return texture2D(uReel,(tile + centreSafe)/uGrid).rgb;
+}
+vec3 singleLight(float minute) {
+  float hour=mod(minute/60.,24.);
+  float sun=smoothstep(5.,8.6,hour)*(1.-smoothstep(17.1,20.3,hour));
+  float amber=bell(hour,6.55,1.24)+bell(hour,18.2,1.32);
+  return mix(vec3(.25,.32,.47),vec3(1.),sun)+amber*vec3(.39,.13,-.035);
+}
+vec3 reelExposure(vec2 point,float minute) {
+  vec3 first=reelTile(point,0.);
+  if(uFrameCount==1) {
+    vec3 ratio=clamp(singleLight(minute)/singleLight(uFrameTimes[0]),.40,1.72);
+    return clamp(first*ratio,0.,1.);
+  }
+  float start=uFrameTimes[0];
+  float current=mod(minute-start,1440.)+start;
+  if(current>uLastFrameTime) {
+    return current-uLastFrameTime>start+1440.-current ? first : reelTile(point,float(uFrameCount-1));
+  }
+  for(int i=1;i<6;i++) {
+    if(i>=uFrameCount) break;
+    if(current<=uFrameTimes[i]) {
+      float amount=(current-uFrameTimes[i-1])/(uFrameTimes[i]-uFrameTimes[i-1]);
+      if(uCut==1) return reelTile(point,amount<.5 ? float(i-1) : float(i));
+      vec3 a=reelTile(point,float(i-1)), b=reelTile(point,float(i));
+      return sqrt(mix(a*a,b*b,amount));
+    }
+  }
+  return first;
+}
 void main() {
   float t = localTime(uv);
+  if (uFrameCount>0) {
+    gl_FragColor=vec4(reelExposure(uv,t*60.),1.);
+    return;
+  }
   vec3 solar = solarDirection(t);
   float solarAlt = solar.z;
   float day = daylight(solarAlt);
@@ -275,6 +318,7 @@ void main() {
     gl.uniform1i(gl.getUniformLocation(program, "uPhoto"), 0);
     gl.uniform1i(gl.getUniformLocation(program, "uMask"), 1);
     gl.uniform1i(gl.getUniformLocation(program, "uAtlas"), 2);
+    gl.uniform1i(gl.getUniformLocation(program, "uReel"), 3);
     const center = gl.getUniformLocation(program, "uCenter");
     const span = gl.getUniformLocation(program, "uSpan");
     const curve = gl.getUniformLocation(program, "uCurve[0]");
@@ -292,15 +336,56 @@ void main() {
     const precession = gl.getUniformLocation(program, "uPrecession");
     const solarStart = gl.getUniformLocation(program, "uSolarStart");
     const solarEnd = gl.getUniformLocation(program, "uSolarEnd");
+    const fieldCount=gl.getUniformLocation(program,"uFrameCount");
+    const fieldCut=gl.getUniformLocation(program,"uCut");
+    const fieldGrid=gl.getUniformLocation(program,"uGrid");
+    const fieldTimes=gl.getUniformLocation(program,"uFrameTimes[0]");
+    const fieldLast=gl.getUniformLocation(program,"uLastFrameTime");
+    gl.uniform2f(gl.getUniformLocation(program,"uTileInset"),.5/Field.tileWidth,.5/Field.tileHeight);
+    const reelTexture=gl.createTexture();
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D,reelTexture);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([0,0,0,255]));
     let activePlace;
     let activeSky;
+    let activeReel;
     return {
-      draw(state, width, height) {
+      draw(state, width, height, sheet) {
         if (canvas.width !== width || canvas.height !== height) {
           canvas.width = width;
           canvas.height = height;
         }
         const place = state.place ?? "cape";
+        gl.viewport(0, 0, width, height);
+        gl.uniform1f(center, state.minute / 60);
+        gl.uniform1f(span, state.span / 60);
+        gl.uniform1fv(curve, state.curve);
+        gl.uniform2fv(axis, direction(state.angle));
+        if(place==="field"){
+          const {id,times,mix}=state.field;
+          if(activeReel!==id){
+            const image=sheet||Field.get(id);
+            if(!image)return;
+            gl.activeTexture(gl.TEXTURE3);
+            gl.bindTexture(gl.TEXTURE_2D,reelTexture);
+            gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
+            const cols=Math.min(3,times.length), values=new Float32Array(Field.maxFrames);
+            values.set(times);
+            gl.uniform2f(fieldGrid,cols,Math.ceil(times.length/cols));
+            gl.uniform1fv(fieldTimes,values);
+            gl.uniform1f(fieldLast,times.at(-1));
+            gl.uniform1i(fieldCut,Number(mix==="cut"));
+            activeReel=id;
+          }
+          gl.uniform1i(fieldCount,times.length);
+          gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+          return;
+        }
+        gl.uniform1i(fieldCount,0);
         if (activePlace !== place) {
           textures[place].forEach((texture, i) => {
             gl.activeTexture(gl.TEXTURE0 + i);
@@ -328,11 +413,6 @@ void main() {
           gl.uniform4fv(reflection, bodies.reflection.disc);
           gl.uniform3fv(reflectionLight, bodies.reflection.light);
         }
-        gl.viewport(0, 0, width, height);
-        gl.uniform1f(center, state.minute / 60);
-        gl.uniform1f(span, state.span / 60);
-        gl.uniform1fv(curve, state.curve);
-        gl.uniform2fv(axis, direction(state.angle));
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       }
     };

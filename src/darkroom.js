@@ -24,6 +24,7 @@ const note = {
   fold: "中间与两侧交替经过白昼和黑夜。"
 };
 const thumbnails = new WeakMap();
+const sessionPlates = new Set();
 let plates = readPlates();
 let state = Optics.initial();
 let scene, printer, printSurface;
@@ -34,6 +35,7 @@ let playing = false;
 let probePosition = null;
 let toastTimer = 0;
 let rolling = false;
+let making = false;
 
 function readPlates() {
   try {
@@ -52,7 +54,7 @@ function readPlates() {
 
 function savePlates() {
   try {
-    localStorage.setItem(storageKey, JSON.stringify(plates));
+    localStorage.setItem(storageKey, JSON.stringify(plates.filter(plate=>!sessionPlates.has(plate.id))));
     return true;
   } catch {
     return false;
@@ -167,7 +169,8 @@ function updateControls() {
   ticks.forEach((tick, i) => {
     const local = timeAt(state, i / 4);
     tick.textContent = clock(local);
-    tick.title = `${Sky.advanceDate(state.date, Math.floor((local+.5) / Optics.DAY))} ${tick.textContent}`;
+    tick.title = state.field ? tick.textContent :
+      `${Sky.advanceDate(state.date, Math.floor((local+.5) / Optics.DAY))} ${tick.textContent}`;
   });
   updateProbe();
   drawGraph();
@@ -182,7 +185,9 @@ function drawFrame(now) {
   if (playing && lastFrame && !document.hidden) {
     state.minute += Math.min(100, now - lastFrame) * .033;
     if (state.minute >= Optics.DAY) {
-      if (state.date === Sky.lastDate) {
+      if (state.field) {
+        state.minute = wrapDay(state.minute);
+      } else if (state.date === Sky.lastDate) {
         state.minute = Optics.DAY - 1;
         interruptPlay();
       } else {
@@ -257,7 +262,8 @@ function applyState(next) {
   interruptPlay();
   const previousPlace = state.place;
   state = Optics.copy(next);
-  if (state.place !== previousPlace) {
+  Field.select(state.field);
+  if (state.place !== previousPlace || state.field) {
     updatePlace();
     updateAmbience();
   }
@@ -266,19 +272,38 @@ function applyState(next) {
 }
 
 function updatePlace() {
+  const field = state.field;
   const place = PLACES[state.place];
   for (const button of placeButtons) {
     button.setAttribute("aria-pressed", button.dataset.place === state.place);
   }
-  $("scene").setAttribute("aria-label", `${place.title}的分时曝光画面`);
-  $("sound-title").textContent = place.sound;
+  $("scene").setAttribute("aria-label", `${field?.title || place.title}的分时曝光画面`);
+  $("field-open").setAttribute("aria-pressed",Boolean(field));
+  $("sky-details").hidden=$("share").hidden=Boolean(field);
+  $("sound").closest(".sound").hidden=Boolean(field);
+  $("field-info").hidden=!field;
+  if(place) $("sound-title").textContent=place.sound;
+  if(field) $("field-info").textContent=Field.caption(field.times)+" ↗";
+  const credits=$("field-credits");
+  credits.hidden=!field?.credits.length;
+  credits.replaceChildren(...(field?.credits || []).map(item=>{
+    const link=document.createElement("a");
+    link.href=item.url;
+    link.rel="noopener noreferrer";
+    link.target="_blank";
+    link.textContent=`${item.by||"Commons"} · ${item.license} ↗`;
+    return link;
+  }));
 }
 
 for (const button of placeButtons) {
   const place = button.dataset.place;
   button.querySelector(".location-thumb").style.backgroundImage = `url("${PLACES[place].textures.photo}")`;
   button.addEventListener("click", () => {
-    if (state.place !== place) applyState({...state, place});
+    if (state.place !== place) {
+      const {field, ...exposure}=state;
+      applyState({...exposure, place});
+    }
   });
 }
 
@@ -307,7 +332,8 @@ $("finder").addEventListener("pointerleave", () => {
   updateProbe();
 });
 $("show-probe").addEventListener("change", updateProbe);
-$("reset").addEventListener("click", () => applyState({...Optics.initial(), place: state.place, date: state.date}));
+$("reset").addEventListener("click", () => applyState(state.field ? Field.initial(state.field) :
+  {...Optics.initial(), place: state.place, date: state.date}));
 $("play").addEventListener("click", togglePlay);
 $("help").addEventListener("click", () => $("manual").showModal());
 $("sky-details").addEventListener("click", () => {
@@ -416,16 +442,21 @@ function loadSharedExposure() {
   }
 }
 
-function makePlate() {
-  if (!printer) return;
+async function makePlate() {
+  if (!printer || making) return;
   if (plates.length >= limit) {
     toast("底片夹已满。移除一张底片后可继续冲印。");
     return;
   }
+  making=true;
+  const shot=Optics.copy(state);
+  const savedReel=!shot.field || await Field.keep(shot.field);
   const next = Number.parseInt(plates[0]?.title?.match(/\d+$/)?.[0] ?? "0", 10) + 1;
   const id = `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  plates.unshift({id, title: `我的底片 ${String(next).padStart(2, "0")}`, state: Optics.copy(state)});
-  const saved = savePlates();
+  if(!savedReel) sessionPlates.add(id);
+  plates.unshift({id, title: `我的底片 ${String(next).padStart(2, "0")}`, state: shot});
+  const saved = savePlates() && savedReel;
+  making=false;
   renderShelf();
   if (!motion.matches) {
     const flash = $("flash");
@@ -438,6 +469,18 @@ function makePlate() {
 }
 
 $("flash").addEventListener("animationend", event => { event.currentTarget.hidden = true; });
+
+function paintThumbnail(plate,cover,sheet) {
+  if (!printer) return;
+  if (!thumbnails.has(plate)) {
+    printer.draw(plate.state, 384, 216, sheet);
+    thumbnails.set(plate, printSurface.toDataURL("image/jpeg", .84));
+  }
+  const image = new Image(384, 216);
+  image.src = thumbnails.get(plate);
+  image.alt = "";
+  cover.append(image);
+}
 
 function renderShelf() {
   const all = [...plates, ...library];
@@ -456,21 +499,23 @@ function renderShelf() {
     cover.setAttribute("aria-label", `打开${plate.title}`);
     cover.dataset.action = "open";
     cover.disabled = !printer;
-    cover.addEventListener("click", () => {
-      applyState(plate.state);
-      if (location.hash !== "#darkroom") location.hash = "darkroom";
-      else $("darkroom").scrollIntoView();
-      toast(`已取回「${plate.title}」`);
+    cover.addEventListener("click", async () => {
+      try {
+        if(plate.state.field) {
+          await Field.open(plate.state.field);
+          if(!cover.isConnected) return;
+        }
+        applyState(plate.state);
+        if (location.hash !== "#darkroom") location.hash = "darkroom";
+        else $("darkroom").scrollIntoView();
+        toast(`已取回「${plate.title}」`);
+      } catch { toast("原片已不在当前浏览器。"); }
     });
     if (printer) {
-      if (!thumbnails.has(plate)) {
-        printer.draw(plate.state, 384, 216);
-        thumbnails.set(plate, printSurface.toDataURL("image/jpeg", .84));
-      }
-      const image = new Image(384, 216);
-      image.src = thumbnails.get(plate);
-      image.alt = "";
-      cover.append(image);
+      if(thumbnails.has(plate)||!plate.state.field) paintThumbnail(plate,cover);
+      else Field.open(plate.state.field).then(sheet=>{
+        if(cover.isConnected) paintThumbnail(plate,cover,sheet);
+      }).catch(()=>{cover.title="原片已不在当前浏览器";});
     }
     const meta = document.createElement("div");
     meta.className = "plate-meta";
@@ -481,7 +526,8 @@ function renderShelf() {
     const time = document.createElement("time");
     time.textContent = time.dateTime = clock(plate.state.minute);
     const location = document.createElement("span");
-    location.textContent = PLACES[plate.state.place].title;
+    location.textContent = plate.state.field?.title || PLACES[plate.state.place].title;
+    location.title=location.textContent;
     details.append(location, time);
     meta.append(title, details);
     const actions = document.createElement("div");
@@ -505,7 +551,10 @@ function renderShelf() {
       remove.addEventListener("click", () => {
         if (!confirm(`从底片夹移除「${plate.title}」？`)) return;
         plates = plates.filter(item => item !== plate);
-        toast(savePlates() ? "已移除底片。" : "已从当前会话移除。");
+        sessionPlates.delete(plate.id);
+        const saved=savePlates(), reel=plate.state.field;
+        if(saved&&reel&&!plates.some(remaining=>remaining.state.field?.id===reel.id)) Field.forget(reel).catch(()=>{});
+        toast(saved ? "已移除底片。" : "已从当前会话移除。");
         renderShelf();
       });
       actions.append(remove);
@@ -526,29 +575,38 @@ async function exportPlate(plate) {
   rolling = true;
   try {
     const place = PLACES[plate.state.place];
+    const field=plate.state.field;
+    const sheet=field?await Field.open(field):undefined;
     const paper = document.createElement("canvas");
     paper.width = 2000;
     paper.height = 1350;
     const g = paper.getContext("2d");
     const x = 80, y = 118, width = 1840, height = 1035;
-    printer.draw(plate.state, width, height);
+    printer.draw(plate.state, width, height,sheet);
     g.fillStyle = "#eae3d4";
     g.fillRect(0, 0, paper.width, paper.height);
     g.fillStyle = "#383129";
     g.font = "600 21px 'Consolas', monospace";
-    g.fillText(`TIME DARKROOM   /   ${place.english}`, x, 77);
+    g.fillText(`TIME DARKROOM   /   ${place?.english||"FIELD REEL"}`, x, 77);
     g.textAlign = "right";
-    g.fillText(`${plate.state.date}   /   UTC+${Sky.SITES[plate.state.place].utc}`, paper.width - x, 77);
+    g.fillText(field ? (field.times.length===1?"SINGLE PHOTO / TONAL STUDY":`${field.times.length} ORIGINAL EXPOSURES`)
+      : `${plate.state.date}   /   UTC+${Sky.SITES[plate.state.place].utc}`, paper.width - x, 77);
     g.textAlign = "left";
     g.drawImage(printSurface, x, y, width, height);
     g.strokeStyle = "#39332a";
     g.lineWidth = 2;
     g.strokeRect(x - 1, y - 1, width + 2, height + 2);
     g.font = "500 44px 'STSong', 'Songti SC', 'SimSun', serif";
-    g.fillText(plate.title, x, 1231);
+    g.fillText(field?.title || plate.title, x, 1231,1230);
     g.font = "19px 'Consolas', monospace";
     g.fillStyle = "#615546";
-    g.fillText(`PLATE ${place.number}  /  EXPOSURE ${plate.state.angle}°`, x, 1297);
+    g.fillText(`PLATE ${place?.number||"03"}  /  EXPOSURE ${plate.state.angle}°`, x, 1297);
+    if(field?.credits.length){
+      g.font="17px system-ui, sans-serif";
+      const names=[...new Set(field.credits.map(item=>item.by||"Commons"))].join(" / ");
+      const licenses=[...new Set(field.credits.map(item=>item.license))].join(", ");
+      g.fillText(`Wikimedia Commons · ${names} · ${licenses}`,x,1264,1230);
+    }
     g.strokeStyle = "#8f8070";
     g.beginPath();
     g.moveTo(1432, 1244);
@@ -561,8 +619,9 @@ async function exportPlate(plate) {
       g.fillText(clock(timeAt(plate.state, i / 4)), spot, 1285);
       g.fillRect(spot - 1, 1238, 2, 13);
     }
-    const blob = await new Promise(resolve => paper.toBlob(resolve, "image/png"));
+    let blob = await new Promise(resolve => paper.toBlob(resolve, "image/png"));
     if (!blob) throw new Error("PNG could not be encoded");
+    if(field) blob=await Field.writeCredit(blob,field.credits);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -612,7 +671,7 @@ let audioBed;
 function updateAmbience() {
   if (!audioBed) return;
   const {audio, tracks} = audioBed;
-  const enabled = $("sound").checked;
+  const enabled = $("sound").checked && !state.field;
   if (enabled && !tracks.has(state.place)) tracks.set(state.place, createAmbience(audio, state.place));
   for (const [place, gain] of tracks) {
     gain.gain.setTargetAtTime(enabled && place === state.place ? .58 : 0, audio.currentTime, .20);
@@ -646,6 +705,10 @@ function unavailable(message) {
 }
 
 async function start() {
+  FieldDesk.mount(manifest=>{
+    applyState(Field.initial(manifest));
+    toast("景片已显影。可调曝光，也可冲印保存。");
+  });
   updatePlace();
   updateControls();
   updateNav();

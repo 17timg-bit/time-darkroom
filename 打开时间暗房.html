@@ -4,17 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#141412">
-  <meta name="application-version" content="1.3.0">
+  <meta name="application-version" content="1.4.0">
   <title>时间暗房 · Time Darkroom</title>
-  <link rel="stylesheet" href="src/darkroom.css?v=1.3.0">
-  <script defer src="vendor/astronomy.browser.min.js?v=1.3.0"></script>
-  <script defer src="assets/cape.js?v=1.3.0"></script>
-  <script defer src="assets/lake.js?v=1.3.0"></script>
-  <script defer src="assets/stars.js?v=1.3.0"></script>
-  <script defer src="assets/moon.js?v=1.3.0"></script>
-  <script defer src="src/sky.js?v=1.3.0"></script>
-  <script defer src="src/optics.js?v=1.3.0"></script>
-  <script defer src="src/darkroom.js?v=1.3.0"></script>
+  <link rel="stylesheet" href="src/darkroom.css?v=1.4.0">
+  <link rel="stylesheet" href="src/field.css?v=1.4.0">
+  <script defer src="vendor/astronomy.browser.min.js?v=1.4.0"></script>
+  <script defer src="assets/cape.js?v=1.4.0"></script>
+  <script defer src="assets/lake.js?v=1.4.0"></script>
+  <script defer src="assets/stars.js?v=1.4.0"></script>
+  <script defer src="assets/moon.js?v=1.4.0"></script>
+  <script defer src="src/sky.js?v=1.4.0"></script>
+  <script defer src="src/optics.js?v=1.4.0"></script>
+  <script defer src="src/field.js?v=1.4.0"></script>
+  <script defer src="src/field-desk.js?v=1.4.0"></script>
+  <script defer src="src/darkroom.js?v=1.4.0"></script>
 </head>
 <body>
   <header class="topbar">
@@ -45,6 +48,9 @@
               <span class="location-thumb" aria-hidden="true"></span>
               <span>镜湖<small>MIRROR LAKE</small></span>
             </button>
+            <button id="field-open" class="location-option field-open" type="button" aria-haspopup="dialog">
+              <span aria-hidden="true">＋</span><span>取景台<small>导入 / 寻找景片</small></span>
+            </button>
           </div>
         </fieldset>
       </div>
@@ -53,7 +59,9 @@
           <div class="film-label">
             <span><i></i> <span id="view-status">静止曝光</span></span>
             <button id="sky-details" class="quiet sky-details" type="button"><span id="current-date">2026-11-18</span><span>天象 ↗</span></button>
+            <button id="field-info" class="quiet sky-details" type="button" hidden></button>
           </div>
+          <div id="field-credits" class="field-credits" hidden></div>
           <div id="finder" class="finder">
             <canvas id="scene" aria-label="岬角灯塔，同一画面的各个位置来自不同时间"></canvas>
             <div class="loading" id="loading" role="status">正在装入底片…</div>
@@ -116,7 +124,7 @@
       <div class="shelf-head"><div><h2 id="shelf-title">底片夹</h2><p>打开一张底片，就能回到它的时间。</p></div><span id="shelf-tally"></span></div>
       <div id="plates" class="plates"></div>
     </section>
-    <footer><span>TIME DARKROOM · v1.3.0</span><span>岬角灯塔 / 镜湖</span></footer>
+    <footer><span>TIME DARKROOM · v1.4.0</span><span>岬角灯塔 / 镜湖 / 取景台</span></footer>
   </main>
   <dialog id="manual">
     <form method="dialog"><button class="quiet close" value="close" aria-label="关闭说明">×</button></form>
@@ -124,6 +132,7 @@
     <p>画面沿曝光方向依次取样。取景框下方的五个刻度显示从起点到终点的时刻。把方向调到 90°，时间就会从天空流向海面。</p>
     <p>切换取景地时，当前曝光参数会随你过去。在镜湖，水面倒映的是湖面所取的时刻，天已经亮了，水里还可以有星星。</p>
     <p>从取景框顶部打开「天象」可改变观测日期。日月只会在该时刻进入镜头且未被地形挡住时出现。</p>
+    <p>在「取景台」可以导入自己的照片，或从 Wikimedia Commons 选取景片。同机位的多张实拍可按时刻混合。单张只做色调推演。</p>
     <dl>
       <dt>同刻</dt><dd>整张照片来自同一分钟。用它观察灯塔从破晓到入夜。</dd>
       <dt>扫过</dt><dd>从曝光起点走向终点，时间向前推进。</dd>
@@ -164,6 +173,67 @@
       <button id="copy-link" type="button" class="print">复制链接</button>
     </div>
     <p id="copy-status" role="status"></p>
+  </dialog>
+  <dialog id="field-desk" aria-labelledby="field-title">
+    <header class="desk-header">
+      <div><h2 id="field-title">取景台</h2><p>同一个机位，收进几次不同的光。</p></div>
+      <form method="dialog"><button class="quiet close" value="close" aria-label="关闭取景台">×</button></form>
+    </header>
+    <div class="desk-tabs" role="tablist" aria-label="景片来源">
+      <button type="button" role="tab" aria-selected="true" aria-controls="local-reel" id="local-tab">本地胶卷 <span id="frame-count">0 / 6</span></button>
+      <button type="button" role="tab" aria-selected="false" aria-controls="world-reel" id="world-tab" tabindex="-1">世界漫游 <span aria-hidden="true">↗</span></button>
+    </div>
+    <div class="desk-body">
+      <section id="local-reel" role="tabpanel" aria-labelledby="local-tab">
+        <div class="desk-editor">
+          <div>
+            <div id="photo-drop" class="photo-drop">
+              <label for="local-photo" class="pick-file">选取本地照片</label>
+              <input id="local-photo" type="file" multiple accept="image/jpeg,image/png,image/webp,image/avif">
+              <span>或拖放照片到这里 · JPG / PNG / WebP / AVIF</span>
+            </div>
+            <div id="field-frames" class="field-frames"></div>
+            <label class="reel-name"><span>景片名称</span><input id="reel-title" type="text" maxlength="52" placeholder="我的取景地"></label>
+          </div>
+          <div>
+            <div class="align-head"><strong>构图校片</strong><label><input id="ghost" type="checkbox" checked>叠第一张</label></div>
+            <canvas id="align-canvas" width="640" height="360" aria-label="拖动构图，方向键微调" tabindex="0"></canvas>
+            <div class="align-tools">
+              <label for="field-zoom">缩放 <input type="range" id="field-zoom" min="100" max="200" value="100"></label>
+              <button class="quiet" id="align-reset" type="button">构图复位</button>
+            </div>
+            <p id="align-hint">加入照片后可拖动构图。放大可增加平移余量。</p>
+            <fieldset id="field-mix"><legend>样本之间</legend>
+              <label><input type="radio" name="field-mix" value="blend" checked> 柔接</label>
+              <label><input type="radio" name="field-mix" value="cut"> 切片</label>
+            </fieldset>
+          </div>
+        </div>
+      </section>
+      <section id="world-reel" role="tabpanel" aria-labelledby="world-tab" hidden>
+        <div class="world-search">
+          <form id="world-form">
+            <label class="world-label" for="world-query">想去哪里取景？</label>
+            <div class="world-input"><input id="world-query" type="search" maxlength="100" placeholder="地名、景观或外文地名" required><button class="print" type="submit">寻找景片</button></div>
+          </form>
+          <div class="world-pins" aria-label="取景路线">
+            <button type="button" data-route="Mount Fuji" data-light="sunrise">富士山的第一束光</button>
+            <button type="button" data-route="Lake Bled" data-light="">布莱德湖的倒影</button>
+            <button type="button" data-route="West Lake Hangzhou" data-light="sunset">西湖入暮</button>
+            <button type="button" data-route="Golden Gate Bridge" data-light="night">金门大桥入夜</button>
+          </div>
+          <label class="world-light">搜寻光线
+            <select id="world-light"><option value="">任意</option><option value="sunrise">晨光</option><option value="sunset">暮色</option><option value="night">夜景</option></select>
+          </label>
+          <p id="world-note" role="status">搜索 Wikimedia Commons 的公开景片。</p>
+        </div>
+        <div id="world-results" class="world-results"></div>
+      </section>
+    </div>
+    <footer class="desk-footer">
+      <div><p id="reel-status" role="status">照片保存在当前浏览器。</p><p id="reel-window"></p></div>
+      <button id="expose-reel" class="print" type="button" disabled>带入暗房 <span aria-hidden="true">↗</span></button>
+    </footer>
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
 </body>
