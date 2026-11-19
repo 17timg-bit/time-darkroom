@@ -223,6 +223,13 @@ const Field = (() => {
     return {...Optics.initial(),place:"field",field:manifest,
       minute:Optics.wrapDay((start+end)/2),span:manifest.times.length===1?1080:Math.max(30,end-start)};
   }
+  function sampledMinute(manifest, minute) {
+    if (manifest.times.length < 2) return minute;
+    const start = manifest.times[0], end = manifest.times.at(-1);
+    const unwrapped = Optics.wrapDay(minute - start) + start;
+    if (unwrapped <= end) return unwrapped;
+    return unwrapped - end > start + day - unwrapped ? start : end;
+  }
   function caption(items) {
     return items.length===1 ? "单张推演 · 色调模拟" :
       `${items.length} 张原片 · ${formatTime(items[0])} → ${items.at(-1)>=day?"次日 ":""}${formatTime(items.at(-1))}`;
@@ -252,5 +259,5 @@ const Field = (() => {
   }
 
   return {maxFrames,tileWidth,tileHeight,credit,validate,arrange,formatTime,parseTime,normalize,
-    load,save,photoImage,framing,paint,compile,initial,caption,select,get,open,keep,forget,writeCredit};
+    load,save,photoImage,framing,paint,compile,initial,sampledMinute,caption,select,get,open,keep,forget,writeCredit};
 })();

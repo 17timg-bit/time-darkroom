@@ -15,6 +15,10 @@ const Optics = (() => {
     }
   };
   const DAY = 1440;
+  const ASPECT = 16 / 9;
+  const SPOT_LIMIT = 3;
+  const SPOT_RADIUS = [.08, .68];
+  const SPOT_FEATHER = [.10, .90];
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const wrapDay = value => {
     const remainder = value % DAY;
@@ -24,8 +28,11 @@ const Optics = (() => {
     const rounded = wrapDay(Math.round(minutes));
     return [Math.floor(rounded / 60), rounded % 60].map(digit => String(digit).padStart(2, "0")).join(":");
   };
-  const initial = () => ({mode: "scan", minute: 995, span: 1200, curve: [...MODES.scan], angle: 0, place: "cape", date: Sky.defaultDate});
-  const copy = state => ({...state, curve: [...state.curve]});
+  const initial = () => ({
+    mode: "scan", minute: 995, span: 1200, curve: [...MODES.scan], angle: 0, place: "cape",
+    date: Sky.defaultDate, spots: []
+  });
+  const copy = state => ({...state, curve: [...state.curve], spots: (state.spots ?? []).map(spot => ({...spot}))});
   const offsetAt = (curve, x) => {
     const section = clamp(x, 0, 1) * 4;
     const i = Math.min(Math.floor(section), 3);
@@ -35,7 +42,7 @@ const Optics = (() => {
   const timeAt = (state, x) => state.minute + state.span * offsetAt(state.curve, x);
   function direction(angle) {
     const radians = angle * Math.PI / 180;
-    const x = Math.cos(radians) * 16 / 9;
+    const x = Math.cos(radians) * ASPECT;
     const y = Math.sin(radians);
     const width = Math.abs(x) + Math.abs(y);
     return [x / width, y / width];
@@ -44,18 +51,47 @@ const Optics = (() => {
     const [dx, dy] = direction(angle);
     return .5 + (x - .5) * dx + (y - .5) * dy;
   }
+  function spotWeight(spot, x, y) {
+    const distance = Math.hypot((x - spot.x) * ASPECT, y - spot.y);
+    const progress = clamp((1 - distance / spot.radius) / spot.feather, 0, 1);
+    return progress * progress * (3 - 2 * progress);
+  }
+  function sampleTime(state, x, y, [dx, dy] = direction(state.angle)) {
+    let minute = timeAt(state, .5 + (x - .5) * dx + (y - .5) * dy);
+    const spots = state.spots ?? [];
+    if (state.field && spots.length) minute = Field.sampledMinute(state.field, minute);
+    for (const spot of spots) {
+      const target = state.field ? Field.sampledMinute(state.field, spot.minute) : spot.minute;
+      minute += (target - minute) * spotWeight(spot, x, y);
+    }
+    return minute;
+  }
+  function cleanSpots(spots) {
+    if (!Array.isArray(spots) || spots.length > SPOT_LIMIT) return null;
+    const within = (value, min, max) => Number.isFinite(value) && value >= min && value <= max;
+    const result = [];
+    for (const spot of spots) {
+      if (!spot || !within(spot.x, 0, 1) || !within(spot.y, 0, 1) ||
+          !within(spot.radius, ...SPOT_RADIUS) || !within(spot.feather, ...SPOT_FEATHER) ||
+          !within(spot.minute, 0, DAY - 1) || !Number.isInteger(spot.minute)) return null;
+      const {x, y, radius, feather, minute} = spot;
+      result.push({x, y, radius, feather, minute});
+    }
+    return result;
+  }
   const cleanState = state => {
     const place = state?.place ?? "cape";
     const field = place === "field" ? Field.validate(state?.field) : null;
+    const spots = cleanSpots(state?.spots ?? []);
     if (!state || (state.mode !== "custom" && !Object.hasOwn(MODES, state.mode)) ||
         !Number.isFinite(state.minute) || !Number.isFinite(state.span) ||
         !Array.isArray(state.curve) || state.curve.length !== 5 ||
         !state.curve.every(Number.isFinite) ||
         !Number.isFinite(state.angle ?? 0) || typeof place !== "string" || (!field && !Object.hasOwn(PLACES, place)) ||
-        !Sky.validDate(state.date ?? Sky.defaultDate)) return null;
+        !Sky.validDate(state.date ?? Sky.defaultDate) || !spots) return null;
     return {mode: state.mode, minute: wrapDay(state.minute), span: clamp(state.span, 30, DAY),
       curve: state.curve.map(value => clamp(value, -.5, .5)),
-      angle: clamp(Math.round(state.angle ?? 0), 0, 359), place, date: state.date ?? Sky.defaultDate,
+      angle: clamp(Math.round(state.angle ?? 0), 0, 359), place, date: state.date ?? Sky.defaultDate, spots,
       ...(field ? {field} : {})};
   };
 
@@ -71,6 +107,9 @@ varying vec2 uv;
 uniform sampler2D uPhoto, uMask, uAtlas;
 uniform float uCenter, uSpan, uCurve[5];
 uniform vec2 uDirection;
+uniform int uSpotCount;
+uniform vec4 uSpots[${SPOT_LIMIT}];
+uniform float uSpotHours[${SPOT_LIMIT}];
 uniform vec2 uWater;
 uniform vec3 uLantern;
 uniform vec3 uCamera;
@@ -87,6 +126,12 @@ uniform float uFrameTimes[6], uLastFrameTime;
 const float TAU = 6.283185307;
 const float DEG = .01745329251994;
 
+float reelTime(float minute) {
+  float start = uFrameTimes[0];
+  float current = mod(minute - start, 1440.) + start;
+  if (current <= uLastFrameTime) return current;
+  return current - uLastFrameTime > start + 1440. - current ? start : uLastFrameTime;
+}
 float localTime(vec2 point) {
   float i = clamp(.5 + dot(point - .5, uDirection), 0., 1.) * 4.;
   float offset;
@@ -94,7 +139,16 @@ float localTime(vec2 point) {
   else if (i < 2.) offset = mix(uCurve[1], uCurve[2], i - 1.);
   else if (i < 3.) offset = mix(uCurve[2], uCurve[3], i - 2.);
   else offset = mix(uCurve[3], uCurve[4], i - 3.);
-  return uCenter + uSpan * offset;
+  float hour = uCenter + uSpan * offset;
+  if (uSpotCount > 0 && uFrameCount > 1) hour = reelTime(hour * 60.) / 60.;
+  for (int n = 0; n < ${SPOT_LIMIT}; n++) {
+    if (n >= uSpotCount) break;
+    vec4 spot = uSpots[n];
+    float distance = length((point - spot.xy) * vec2(${ASPECT.toFixed(9)}, 1.));
+    float progress = clamp((1. - distance / spot.z) / spot.w, 0., 1.);
+    hour = mix(hour, uSpotHours[n], progress * progress * (3. - 2. * progress));
+  }
+  return hour;
 }
 float bell(float a, float center, float width) {
   float q = (a - center) / width;
@@ -160,11 +214,7 @@ vec3 reelExposure(vec2 point,float minute) {
     vec3 ratio=clamp(singleLight(minute)/singleLight(uFrameTimes[0]),.40,1.72);
     return clamp(first*ratio,0.,1.);
   }
-  float start=uFrameTimes[0];
-  float current=mod(minute-start,1440.)+start;
-  if(current>uLastFrameTime) {
-    return current-uLastFrameTime>start+1440.-current ? first : reelTile(point,float(uFrameCount-1));
-  }
+  float current = reelTime(minute);
   for(int i=1;i<6;i++) {
     if(i>=uFrameCount) break;
     if(current<=uFrameTimes[i]) {
@@ -323,6 +373,11 @@ void main() {
     const span = gl.getUniformLocation(program, "uSpan");
     const curve = gl.getUniformLocation(program, "uCurve[0]");
     const axis = gl.getUniformLocation(program, "uDirection");
+    const spotCount = gl.getUniformLocation(program, "uSpotCount");
+    const spotGeometry = gl.getUniformLocation(program, "uSpots[0]");
+    const spotHours = gl.getUniformLocation(program, "uSpotHours[0]");
+    const geometry = new Float32Array(4 * SPOT_LIMIT);
+    const hours = new Float32Array(SPOT_LIMIT);
     const water = gl.getUniformLocation(program, "uWater");
     const lantern = gl.getUniformLocation(program, "uLantern");
     const solarDisc = gl.getUniformLocation(program, "uSun");
@@ -365,6 +420,20 @@ void main() {
         gl.uniform1f(span, state.span / 60);
         gl.uniform1fv(curve, state.curve);
         gl.uniform2fv(axis, direction(state.angle));
+        const spots = state.spots ?? [];
+        gl.uniform1i(spotCount, spots.length);
+        if (spots.length) {
+          spots.forEach(({x, y, radius, feather, minute}, index) => {
+            const start = index * 4;
+            geometry[start] = x;
+            geometry[start + 1] = y;
+            geometry[start + 2] = radius;
+            geometry[start + 3] = feather;
+            hours[index] = (state.field ? Field.sampledMinute(state.field, minute) : minute) / 60;
+          });
+          gl.uniform4fv(spotGeometry, geometry);
+          gl.uniform1fv(spotHours, hours);
+        }
         if(place==="field"){
           const {id,times,mix}=state.field;
           if(activeReel!==id){
@@ -417,5 +486,8 @@ void main() {
       }
     };
   }
-  return {MODES, PLACES, DAY, clamp, wrapDay, clock, initial, copy, offsetAt, timeAt, positionAt, cleanState, loadImage, createRenderer};
+  return {
+    MODES, PLACES, DAY, ASPECT, SPOT_LIMIT, SPOT_RADIUS, SPOT_FEATHER, clamp, wrapDay, clock,
+    initial, copy, offsetAt, timeAt, positionAt, direction, spotWeight, sampleTime, cleanState, loadImage, createRenderer
+  };
 })();

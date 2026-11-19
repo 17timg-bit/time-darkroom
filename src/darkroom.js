@@ -16,7 +16,15 @@ const library = [
   {id: "return", title: "晨昏回环", state: {...Optics.initial(), mode: "fold", minute: 725, curve: [...Optics.MODES.fold]}},
   {id: "tide", title: "海面已经天亮", state: {...Optics.initial(), minute: 396, span: 900, angle: 103}},
   {id: "moon", title: "湖里仍是昨夜", state: {...Optics.initial(), minute: 510, span: 720, angle: 250, place: "lake", date: "2027-01-01"}},
-  {id: "peaks", title: "群峰入夜", state: {...Optics.initial(), minute: 1310, span: 480, place: "lake"}}
+  {id: "peaks", title: "群峰入夜", state: {...Optics.initial(), minute: 1310, span: 480, place: "lake"}},
+  {id: "lantern", title: "灯塔先入夜", state: {
+    ...Optics.initial(), mode: "still", minute: 914, curve: [...Optics.MODES.still],
+    spots: [{x: .84, y: .48, radius: .62, feather: .86, minute: 1180}]
+  }},
+  {id: "moonpool", title: "留一角月影", state: {
+    ...Optics.initial(), mode: "still", minute: 530, place: "lake", date: "2027-01-01", curve: [...Optics.MODES.still],
+    spots: [{x: .72, y: .97, radius: .65, feather: .90, minute: 287}]
+  }}
 ];
 const note = {
   still: "整张照片取自同一分钟。选一颗亮点也能重新展开时间。",
@@ -136,7 +144,7 @@ function drawGraph() {
 
 function updateProbe() {
   const probe = $("probe");
-  probe.hidden = probePosition === null || !$("show-probe").checked;
+  probe.hidden = probePosition === null || !$("show-probe").checked || LocalExposure.editing();
   if (probe.hidden) return;
   const {x, y} = probePosition;
   const finder = $("finder");
@@ -146,7 +154,7 @@ function updateProbe() {
   probe.style.setProperty("--cross-angle", `${state.angle + 90}deg`);
   probe.style.setProperty("--label-shift", `${clamp(-25, -width * x + 3, width * (1 - x) - 54)}px`);
   probe.style.setProperty("--label-top", y * finder.clientHeight < 34 ? "13px" : "-28px");
-  $("probe-time").textContent = clock(timeAt(state, Optics.positionAt(state.angle, x, y)));
+  $("probe-time").textContent = clock(Optics.sampleTime(state, x, y));
 }
 
 function updateControls() {
@@ -164,7 +172,9 @@ function updateControls() {
   $("angle-needle").style.setProperty("--angle", `${state.angle}deg`);
   for (const button of modeButtons) button.setAttribute("aria-pressed", button.dataset.mode === state.mode);
   $("angle").disabled = $("span").disabled = state.mode === "still";
-  $("mode-note").textContent = note[state.mode] ?? "已重新分配照片各处的时间。";
+  $("mode-note").textContent = state.mode === "still" && state.spots.length
+    ? "基础曝光取同一时刻，圈内可保留另外的时间。"
+    : note[state.mode] ?? "已重新分配照片各处的时间。";
   $("current-date").textContent = state.date;
   ticks.forEach((tick, i) => {
     const local = timeAt(state, i / 4);
@@ -261,12 +271,14 @@ knots.forEach((node, i) => {
 function applyState(next) {
   interruptPlay();
   const previousPlace = state.place;
+  const changedSpots = next.spots !== state.spots;
   state = Optics.copy(next);
   Field.select(state.field);
   if (state.place !== previousPlace || state.field) {
     updatePlace();
     updateAmbience();
   }
+  LocalExposure.sync(changedSpots);
   updateControls();
   requestDraw();
 }
@@ -393,12 +405,16 @@ function updateSkyDialog() {
 }
 
 function openShare() {
+  if (state.field) return;
   interruptPlay();
-  const {mode, minute, span, curve, angle, place, date} = state;
-  const recipe = btoa(JSON.stringify([mode, minute, span, ...curve, angle, place, date]))
+  const {mode, minute, span, curve, angle, place, date, spots} = state;
+  const packet = [mode, minute, span, ...curve, angle, place, date];
+  if (spots.length) packet.push(spots.map(({x, y, radius, feather, minute}) => [x, y, radius, feather, minute]));
+  const recipe = btoa(JSON.stringify(packet))
     .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
-  $("share-link").value = `${publicDarkroom}#e=TD3.${recipe}`;
-  $("share-summary").textContent = `${PLACES[place].title} · ${date} · ${clock(timeAt(state, 0))} → ${clock(timeAt(state, 1))} · ${angle}°`;
+  $("share-link").value = `${publicDarkroom}#e=TD${spots.length ? 4 : 3}.${recipe}`;
+  const local = spots.length ? ` · ${spots.length} 处局部曝光` : "";
+  $("share-summary").textContent = `${PLACES[place].title} · ${date} · ${clock(timeAt(state, 0))} → ${clock(timeAt(state, 1))} · ${angle}°${local}`;
   $("copy-status").textContent = "";
   $("share-dialog").showModal();
 }
@@ -417,17 +433,23 @@ async function copyShare() {
 
 function loadSharedExposure() {
   if (!location.hash.startsWith("#e=")) return;
-  const match = /^#e=(TD[123])\.([A-Za-z0-9_-]{1,240})$/.exec(location.hash);
+  const match = /^#e=TD([1-4])\.([A-Za-z0-9_-]{1,720})$/.exec(location.hash);
   let next = null;
   try {
     if (match) {
-      const version = Number(match[1].at(-1));
+      const version = Number(match[1]);
       const parts = JSON.parse(atob(match[2].replaceAll("-", "+").replaceAll("_", "/")));
       if (Array.isArray(parts) && parts.length === 8 + version && Number.isFinite(parts[8])) {
         const place = version === 1 ? "cape" : parts[9];
         const date = version < 3 ? Sky.defaultDate : parts[10];
-        if (typeof place === "string" && Sky.validDate(date)) {
-          next = Optics.cleanState({mode: parts[0], minute: parts[1], span: parts[2], curve: parts.slice(3, 8), angle: parts[8], place, date});
+        const encodedSpots = version < 4 ? [] : parts[11];
+        if (typeof place === "string" && Sky.validDate(date) &&
+            Array.isArray(encodedSpots) && encodedSpots.length <= Optics.SPOT_LIMIT &&
+            encodedSpots.every(spot => Array.isArray(spot) && spot.length === 5)) {
+          const spots = encodedSpots.map(([x, y, radius, feather, minute]) => ({x, y, radius, feather, minute}));
+          next = Optics.cleanState({
+            mode: parts[0], minute: parts[1], span: parts[2], curve: parts.slice(3, 8), angle: parts[8], place, date, spots
+          });
         }
       }
     }
@@ -600,7 +622,8 @@ async function exportPlate(plate) {
     g.fillText(field?.title || plate.title, x, 1231,1230);
     g.font = "19px 'Consolas', monospace";
     g.fillStyle = "#615546";
-    g.fillText(`PLATE ${place?.number||"03"}  /  EXPOSURE ${plate.state.angle}°`, x, 1297);
+    const local = plate.state.spots.length ? `  /  LOCAL ${plate.state.spots.map(spot=>clock(spot.minute)).join(" · ")}` : "";
+    g.fillText(`PLATE ${place?.number||"03"}  /  EXPOSURE ${plate.state.angle}°${local}`, x, 1297);
     if(field?.credits.length){
       g.font="17px system-ui, sans-serif";
       const names=[...new Set(field.credits.map(item=>item.by||"Commons"))].join(" / ");
@@ -700,11 +723,17 @@ function unavailable(message) {
   playing = false;
   $("loading").hidden = false;
   $("loading").textContent = message;
-  $("print").disabled = $("play").disabled = true;
+  $("print").disabled = $("play").disabled = $("spot-toggle").disabled = true;
   renderShelf();
 }
 
 async function start() {
+  LocalExposure.mount(() => state, spots => {
+    interruptPlay();
+    state.spots = spots;
+    updateControls();
+    requestDraw();
+  }, updateProbe);
   FieldDesk.mount(manifest=>{
     applyState(Field.initial(manifest));
     toast("景片已显影。可调曝光，也可冲印保存。");
@@ -732,7 +761,7 @@ async function start() {
     requestDraw();
     renderShelf();
     $("loading").hidden = true;
-    $("print").disabled = false;
+    $("print").disabled = $("spot-toggle").disabled = false;
   } catch (error) {
     console.error(error);
     unavailable("暗房需要启用 WebGL。请在支持 WebGL 的浏览器中打开。");

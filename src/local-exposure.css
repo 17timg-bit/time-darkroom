@@ -1,0 +1,57 @@
+.deck-side { display: flex; align-items: center; gap: 13px; margin-inline-start: auto; }
+.spot-toggle { display: inline-flex; align-items: center; gap: 7px; min-height: 33px; padding: 4px 8px; border: 1px solid #4d4237; border-radius: 3px; color: #d9b08b; background: #231e19; white-space: nowrap; font-size: 12px; }
+.spot-toggle:hover, .spot-toggle[aria-expanded="true"] { border-color: #906b4b; color: #ffdec1; background: #392c20; }
+.spot-glyph { position: relative; width: 12px; height: 12px; border: 1px solid currentColor; border-radius: 50%; }
+.spot-glyph::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: currentColor; }
+.spot-count { color: var(--amber); font: 11px var(--mono); }
+.spot-layer { position: absolute; inset: 0; pointer-events: none; }
+.spot-ring, .spot-pin { position: absolute; left: var(--spot-x); top: var(--spot-y); transform: translate(-50%, -50%); }
+.spot-ring { width: var(--spot-width); height: var(--spot-height); border: 1px solid #ffe2bba5; border-radius: 50%; box-shadow: 0 0 0 1px #18120e40; }
+.spot-ring.is-active { border-color: #ffdbaf; }
+.spot-ring.is-active::after { content: ""; position: absolute; inset: var(--spot-inset); border: 1px dashed #ffdbaf95; border-radius: 50%; }
+.spot-pin {
+  z-index: 1; display: grid; place-items: center; width: 36px; height: 36px; padding: 0;
+  border: 1px solid #f7d6afaa; border-radius: 50%; background: #18130ee6; color: #fff0db;
+  font: 12px var(--mono); cursor: grab; touch-action: none; pointer-events: auto;
+}
+.spot-pin.is-active { z-index: 2; background: #edba83; border-color: #fbdfbd; color: #24170c; }
+.spot-pin:active { cursor: grabbing; }
+.spot-pin::before { content: ""; position: absolute; inset: -5px; border-radius: 50%; }
+.workbench:has(.spot-editor:not([hidden])) { align-items: start; }
+.spot-editor { margin: 0 0 11px; padding: 8px 10px 9px; border: 1px solid #514131; border-radius: 3px; background: #201b16; }
+.spot-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.spot-toolbar h3 { margin: 0 3px 0 0; color: #f2e2d1; font-size: 13px; font-weight: 600; }
+.spot-toolbar .quiet, .spot-remove { color: #cda17e; min-height: 34px; font-size: 12px; }
+.spot-toolbar .quiet:enabled:hover, .spot-remove:hover { color: #f7d3ac; }
+.spot-choices { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.spot-chip { min-height: 29px; padding: 3px 7px; border: 1px solid #584638; border-radius: 2px; background: #171512; color: #cbbeb1; white-space: nowrap; font: 11px var(--mono); }
+.spot-chip[aria-pressed="true"] { color: #ffe1bd; border-color: #916848; background: #3a2d22; }
+.spot-parameters {
+  display: grid; align-items: end; grid-template-columns: auto minmax(80px, 1fr) minmax(80px, 1fr) auto;
+  gap: 6px 15px; margin-top: 5px; padding-top: 8px; border-top: 1px solid #48382b;
+}
+.spot-parameters label { color: #c9b9a7; font-size: 12px; }
+.spot-parameters input[type="time"] { display: block; min-height: 31px; margin-top: 3px; padding-inline: 4px; border: 1px solid #5c4837; border-radius: 2px; background: #171512; color: #f1c398; font: 13px var(--mono); }
+.spot-parameters .spot-range > span { display: flex; justify-content: space-between; gap: 5px; }
+.spot-parameters output { font: 12px var(--mono); color: #efbd92; }
+.spot-range input { --fill: 50%; display: block; appearance: none; width: 100%; height: 27px; margin: 3px 0 0; background: none; cursor: pointer; }
+.spot-range input::-webkit-slider-runnable-track { height: 2px; background: linear-gradient(90deg, #b68a61 var(--fill), #554238 var(--fill)); }
+.spot-range input::-moz-range-track { height: 2px; background: linear-gradient(90deg, #b68a61 var(--fill), #554238 var(--fill)); }
+.spot-range input::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; margin-top: -5px; border: 1px solid #f4d0a6; border-radius: 50%; background: var(--amber); }
+.spot-range input::-moz-range-thumb { width: 11px; height: 11px; border: 1px solid #f4d0a6; border-radius: 50%; background: var(--amber); }
+#spot-guidance { margin-top: 5px; color: #a99b8b; font-size: 11px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 950px) {
+  .spot-parameters { gap: 5px 8px; }
+}
+@media (max-width: 540px) {
+  .deck { flex-wrap: wrap; column-gap: 7px; row-gap: 0; padding-block: 2px; }
+  .deck-buttons { gap: 9px; }
+  .deck-buttons button, .sound { gap: 5px; }
+  .sound { padding-left: 7px; }
+  .spot-toggle { gap: 4px; padding-inline: 5px; }
+  .spot-parameters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .spot-parameters > label:first-child { grid-column: 1; grid-row: 1; }
+  .spot-remove { grid-column: 2; grid-row: 1; justify-self: end; }
+  .spot-pin { width: 33px; height: 33px; }
+}

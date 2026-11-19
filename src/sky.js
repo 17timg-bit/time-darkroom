@@ -92,24 +92,41 @@ const Sky = (() => {
     // Freeze each disc at the time assigned to its own centre. Render the rest of
     // the sky normally per pixel, without stretching a disc across time slices.
     const range = state.curve.map(offset => state.minute + state.span * offset);
+    const spots = state.spots ?? [];
+    const axis = Optics.direction(state.angle);
+    for (const spot of spots) range.push(spot.minute);
     const start = Math.min(...range), end = Math.max(...range);
     function evaluate(minute) {
       const source = interpolated(observation, body, minute);
       const pixel = project(observation, source.dir, waterLine, reflected);
       if (!pixel) return null;
-      const target = Optics.timeAt(state, Optics.positionAt(state.angle, ...pixel));
+      const target = Optics.sampleTime(state, pixel[0], pixel[1], axis);
       return {minute, source, pixel, error: minute - target};
     }
     let best = null;
+    let bestPriority = 0;
     function candidate(point) {
       if (!point || Math.abs(point.error) > .2 || point.source.dir[2] < -Math.sin(point.source.radius)) return;
       const [x, y] = point.pixel;
       if (x < -.04 || x > 1.04 || y < -.04 || y > 1.04) return;
-      if (!best || Math.abs(point.minute - state.minute) < Math.abs(best.minute - state.minute)) best = point;
+      // A deliberately placed disc in a spot's core takes priority over roots in the feather.
+      let priority = 0;
+      for (let i = spots.length - 1; i >= 0; i--) {
+        const weight = Optics.spotWeight(spots[i], x, y);
+        if (weight === 0) continue;
+        if (weight === 1 && point.minute === spots[i].minute) priority = i + 1;
+        break;
+      }
+      if (!best || priority > bestPriority ||
+          (priority === bestPriority && Math.abs(point.minute - state.minute) < Math.abs(best.minute - state.minute))) {
+        best = point;
+        bestPriority = priority;
+      }
     }
     let left = evaluate(start);
     candidate(left);
-    const count = Math.ceil((end - start) / step);
+    for (const spot of spots) candidate(evaluate(spot.minute));
+    const count = Math.ceil((end - start) / (spots.length ? step / 2 : step));
     for (let i = 1; i <= count; i++) {
       const right = evaluate(start + (end - start) * i / count);
       candidate(right);

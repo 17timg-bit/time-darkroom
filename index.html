@@ -4,20 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#141412">
-  <meta name="application-version" content="1.4.0">
+  <meta name="application-version" content="1.5.0">
   <title>时间暗房 · Time Darkroom</title>
-  <link rel="stylesheet" href="src/darkroom.css?v=1.4.0">
-  <link rel="stylesheet" href="src/field.css?v=1.4.0">
-  <script defer src="vendor/astronomy.browser.min.js?v=1.4.0"></script>
-  <script defer src="assets/cape.js?v=1.4.0"></script>
-  <script defer src="assets/lake.js?v=1.4.0"></script>
-  <script defer src="assets/stars.js?v=1.4.0"></script>
-  <script defer src="assets/moon.js?v=1.4.0"></script>
-  <script defer src="src/sky.js?v=1.4.0"></script>
-  <script defer src="src/optics.js?v=1.4.0"></script>
-  <script defer src="src/field.js?v=1.4.0"></script>
-  <script defer src="src/field-desk.js?v=1.4.0"></script>
-  <script defer src="src/darkroom.js?v=1.4.0"></script>
+  <link rel="stylesheet" href="src/darkroom.css?v=1.5.0">
+  <link rel="stylesheet" href="src/field.css?v=1.5.0">
+  <link rel="stylesheet" href="src/local-exposure.css?v=1.5.0">
+  <script defer src="vendor/astronomy.browser.min.js?v=1.5.0"></script>
+  <script defer src="assets/cape.js?v=1.5.0"></script>
+  <script defer src="assets/lake.js?v=1.5.0"></script>
+  <script defer src="assets/stars.js?v=1.5.0"></script>
+  <script defer src="assets/moon.js?v=1.5.0"></script>
+  <script defer src="src/sky.js?v=1.5.0"></script>
+  <script defer src="src/optics.js?v=1.5.0"></script>
+  <script defer src="src/field.js?v=1.5.0"></script>
+  <script defer src="src/field-desk.js?v=1.5.0"></script>
+  <script defer src="src/local-exposure.js?v=1.5.0"></script>
+  <script defer src="src/darkroom.js?v=1.5.0"></script>
 </head>
 <body>
   <header class="topbar">
@@ -69,8 +71,9 @@
             <div class="frame-mark bl"></div><div class="frame-mark br"></div>
             <div class="probe" id="probe" hidden><i></i><span id="probe-time"></span></div>
             <div class="flash" id="flash" hidden></div>
+            <div id="spot-layer" class="spot-layer" role="group" aria-label="局部曝光圈" hidden></div>
           </div>
-          <div class="time-scale" id="time-scale" aria-label="沿当前曝光方向的五个取样时刻">
+          <div class="time-scale" id="time-scale" aria-label="沿当前曝光方向的五个基础取样时刻">
             <span></span><span></span><span></span><span></span><span></span>
           </div>
           <div class="deck">
@@ -79,8 +82,29 @@
               <label class="sound quiet"><input type="checkbox" id="sound"><span class="sound-glyph" aria-hidden="true">♩</span><span id="sound-title">海声</span></label>
               <button id="share" class="quiet" type="button"><span class="share-glyph" aria-hidden="true">↗</span>分享曝光</button>
             </div>
-            <p>在取景框上移动，查看局部时间</p>
+            <div class="deck-side">
+              <p id="probe-hint">在取景框上移动，查看局部时间</p>
+              <button id="spot-toggle" class="quiet spot-toggle" type="button" aria-expanded="false" aria-controls="spot-editor" disabled>
+                <span class="spot-glyph" aria-hidden="true"></span>局部曝光 <span id="spot-count" class="spot-count" hidden></span>
+              </button>
+            </div>
           </div>
+          <section id="spot-editor" class="spot-editor" aria-labelledby="spot-title" hidden>
+            <div class="spot-toolbar">
+              <h3 id="spot-title">局部曝光</h3>
+              <div id="spot-choices" class="spot-choices" role="group" aria-label="选择曝光圈"></div>
+              <button id="spot-add" type="button" class="quiet">＋ 添加一处</button>
+              <button id="spot-undo" type="button" class="quiet" disabled>撤销</button>
+            </div>
+            <div id="spot-parameters" class="spot-parameters" hidden>
+              <label for="spot-time">局部时刻 <input id="spot-time" type="time" required></label>
+              <label class="spot-range" for="spot-radius"><span>半径 <output id="spot-radius-value"></output></span><input id="spot-radius" type="range" min="8" max="68"></label>
+              <label class="spot-range" for="spot-feather"><span>羽化 <output id="spot-feather-value"></output></span><input id="spot-feather" type="range" min="10" max="90"></label>
+              <button id="spot-remove" type="button" class="quiet spot-remove">移除此处</button>
+            </div>
+            <p id="spot-guidance">点画面放一个曝光圈，再为它选时刻。</p>
+            <p id="spot-status" class="visually-hidden" role="status"></p>
+          </section>
         </section>
         <aside class="controls" aria-labelledby="control-title">
           <div class="control-head"><h2 id="control-title">曝光控制</h2><button id="reset" class="quiet reset" type="button">复位</button></div>
@@ -124,7 +148,7 @@
       <div class="shelf-head"><div><h2 id="shelf-title">底片夹</h2><p>打开一张底片，就能回到它的时间。</p></div><span id="shelf-tally"></span></div>
       <div id="plates" class="plates"></div>
     </section>
-    <footer><span>TIME DARKROOM · v1.4.0</span><span>岬角灯塔 / 镜湖 / 取景台</span></footer>
+    <footer><span>TIME DARKROOM · v1.5.0</span><span>岬角灯塔 / 镜湖 / 取景台</span></footer>
   </main>
   <dialog id="manual">
     <form method="dialog"><button class="quiet close" value="close" aria-label="关闭说明">×</button></form>
@@ -133,6 +157,7 @@
     <p>切换取景地时，当前曝光参数会随你过去。在镜湖，水面倒映的是湖面所取的时刻，天已经亮了，水里还可以有星星。</p>
     <p>从取景框顶部打开「天象」可改变观测日期。日月只会在该时刻进入镜头且未被地形挡住时出现。</p>
     <p>在「取景台」可以导入自己的照片，或从 Wikimedia Commons 选取景片。同机位的多张实拍可按时刻混合。单张只做色调推演。</p>
+    <p>开启「局部曝光」，点画面放一个曝光圈，拖圈心移动。每处可设时刻、半径和羽化。重叠时，后加入的圈覆盖前面的圈。</p>
     <dl>
       <dt>同刻</dt><dd>整张照片来自同一分钟。用它观察灯塔从破晓到入夜。</dd>
       <dt>扫过</dt><dd>从曝光起点走向终点，时间向前推进。</dd>
