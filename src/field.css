@@ -46,6 +46,12 @@
 #align-hint, #reel-window { color: var(--dim); font-size: 11px; }
 #field-mix { margin: 9px 0 0; border: 0; padding: 0; display: flex; gap: 12px; }
 #field-mix legend { margin-bottom: 4px; padding: 0; color: var(--mute); font-size: 11px; }
+#field-lighting { margin-top: 11px; padding: 9px 0 0; border-top: 1px solid var(--line); color: var(--mute); font-size: 12px; }
+#field-lighting summary { cursor: pointer; padding: 4px 0; }
+#field-lighting summary:hover { color: var(--ink); }
+.field-light-times { display: flex; flex-wrap: wrap; gap: 7px 13px; margin: 6px 0 0; }
+.field-light-times label { display: flex; align-items: center; gap: 6px; }
+.field-light-times input { padding: 4px 5px; color-scheme: dark; border: 1px solid #564a3d; border-radius: 3px; background: var(--sink); color: var(--ink); font: 12px var(--mono); }
 .desk-footer { display: flex; align-items: center; justify-content: space-between; gap: 11px; border-top-color: var(--line); padding-block: 11px; background: #191813; letter-spacing: 0; }
 .desk-footer .print, .world-input .print { margin: 0; white-space: nowrap; min-height: 39px; }
 .desk-footer .print { gap: 13px; }
@@ -88,3 +94,5 @@
 @media (max-width: 365px) {
   .location-option small { display: none; }
 }
+.deck-buttons #field-original[aria-pressed="true"] { color: var(--amber); }
+.source-preview .spot-layer { display: none; }

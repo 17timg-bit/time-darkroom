@@ -13,6 +13,8 @@ const motion = matchMedia("(prefers-reduced-motion: reduce)");
 const library = [
   {id: "first", title: "一天穿过海岬", state: Optics.initial()},
   {id: "last", title: "最后一束日光", state: {...Optics.initial(), mode: "still", minute: 955, curve: [...Optics.MODES.still]}},
+  {id: "twilight", title: "海岬最后的天光", state: {...Optics.initial(), mode: "still", minute: 1016, curve: [...Optics.MODES.still]}},
+  {id: "blue-hour", title: "镜湖蓝调", state: {...Optics.initial(), mode: "still", minute: 1040, place: "lake", curve: [...Optics.MODES.still]}},
   {id: "return", title: "晨昏回环", state: {...Optics.initial(), mode: "fold", minute: 725, curve: [...Optics.MODES.fold]}},
   {id: "tide", title: "海面已经天亮", state: {...Optics.initial(), minute: 396, span: 900, angle: 103}},
   {id: "moon", title: "湖里仍是昨夜", state: {...Optics.initial(), minute: 510, span: 720, angle: 250, place: "lake", date: "2027-01-01"}},
@@ -40,6 +42,7 @@ let frame = 0;
 let lastFrame = 0;
 let updateTime = 0;
 let playing = false;
+let sourcePreview = false;
 let probePosition = null;
 let toastTimer = 0;
 let rolling = false;
@@ -144,7 +147,7 @@ function drawGraph() {
 
 function updateProbe() {
   const probe = $("probe");
-  probe.hidden = probePosition === null || !$("show-probe").checked || LocalExposure.editing();
+  probe.hidden = sourcePreview || probePosition === null || !$("show-probe").checked || LocalExposure.editing();
   if (probe.hidden) return;
   const {x, y} = probePosition;
   const finder = $("finder");
@@ -176,8 +179,10 @@ function updateControls() {
     ? "基础曝光取同一时刻，圈内可保留另外的时间。"
     : note[state.mode] ?? "已重新分配照片各处的时间。";
   $("current-date").textContent = state.date;
+  const view = viewerExposure();
+  $("view-status").textContent = sourcePreview ? `拍摄原片 · ${clock(view.minute)}` : playing ? "时间流动中" : "静止曝光";
   ticks.forEach((tick, i) => {
-    const local = timeAt(state, i / 4);
+    const local = timeAt(view, i / 4);
     tick.textContent = clock(local);
     tick.title = state.field ? tick.textContent :
       `${Sky.advanceDate(state.date, Math.floor((local+.5) / Optics.DAY))} ${tick.textContent}`;
@@ -188,6 +193,20 @@ function updateControls() {
 
 function requestDraw() {
   if (!frame) frame = requestAnimationFrame(drawFrame);
+}
+
+function viewerExposure() {
+  if (!sourcePreview || !state.field) return state;
+  return {...state, minute: Field.nearestMinute(state.field, state.minute), curve: Optics.MODES.still, spots: []};
+}
+
+function setSourcePreview(next) {
+  if (next === sourcePreview) return;
+  sourcePreview = next;
+  $("field-original").setAttribute("aria-pressed", next);
+  $("finder").classList.toggle("source-preview", next);
+  updateControls();
+  requestDraw();
 }
 
 function drawFrame(now) {
@@ -210,7 +229,7 @@ function drawFrame(now) {
   if (scene) {
     const density = Math.min(devicePixelRatio || 1, 1.6);
     const targetWidth = Math.min(1536, Math.max(16, Math.round($("finder").clientWidth * density)));
-    scene.draw(state, targetWidth, Math.round(targetWidth * 9 / 16));
+    scene.draw(viewerExposure(), targetWidth, Math.round(targetWidth * 9 / 16));
   }
   if (now - updateTime > 90) {
     updateControls();
@@ -221,10 +240,12 @@ function drawFrame(now) {
 
 function interruptPlay() {
   if (playing) togglePlay();
+  setSourcePreview(false);
 }
 
 function togglePlay() {
   if (!scene) return;
+  setSourcePreview(false);
   playing = !playing;
   lastFrame = 0;
   $("view-status").textContent = playing ? "时间流动中" : "静止曝光";
@@ -294,6 +315,7 @@ function updatePlace() {
   $("sky-details").hidden=$("share").hidden=Boolean(field);
   $("sound").closest(".sound").hidden=Boolean(field);
   $("field-info").hidden=!field;
+  $("field-original").hidden=!field;
   if(place) $("sound-title").textContent=place.sound;
   if(field) $("field-info").textContent=Field.caption(field.times)+" ↗";
   const credits=$("field-credits");
@@ -347,6 +369,11 @@ $("show-probe").addEventListener("change", updateProbe);
 $("reset").addEventListener("click", () => applyState(state.field ? Field.initial(state.field) :
   {...Optics.initial(), place: state.place, date: state.date}));
 $("play").addEventListener("click", togglePlay);
+$("field-original").addEventListener("click", () => {
+  const next = !sourcePreview;
+  if (playing) interruptPlay();
+  setSourcePreview(next);
+});
 $("help").addEventListener("click", () => $("manual").showModal());
 $("sky-details").addEventListener("click", () => {
   interruptPlay();
@@ -377,8 +404,13 @@ function updateNav() {
 addEventListener("hashchange", () => {
   updateNav();
   loadSharedExposure();
+  loadTwilight();
   openFilmDemo();
 });
+
+function loadTwilight() {
+  if (location.hash === "#twilight") applyState(library.find(plate => plate.id === "twilight").state);
+}
 
 function openFilmDemo() {
   if (location.hash !== "#film" || !film || document.querySelector("dialog[open]")) return;
@@ -624,7 +656,7 @@ async function exportPlate(plate) {
     g.font = "600 21px 'Consolas', monospace";
     g.fillText(`TIME DARKROOM   /   ${place?.english||"FIELD REEL"}`, x, 77);
     g.textAlign = "right";
-    g.fillText(field ? (field.times.length===1?"SINGLE PHOTO / TONAL STUDY":`${field.times.length} ORIGINAL EXPOSURES`)
+    g.fillText(field ? (field.times.length===1?"SINGLE PHOTO / LIGHT STUDY":`${field.times.length} ORIGINAL EXPOSURES`)
       : `${plate.state.date}   /   UTC+${Sky.SITES[plate.state.place].utc}`, paper.width - x, 77);
     g.textAlign = "left";
     g.drawImage(printSurface, x, y, width, height);
@@ -756,18 +788,21 @@ async function start() {
   updateControls();
   updateNav();
   loadSharedExposure();
+  loadTwilight();
   renderShelf();
   try {
     const sceneImages = Promise.all(Object.entries(PLACES).map(async ([id, place]) => {
       const {photo, mask} = place.textures;
       return [id, await Promise.all([Optics.loadImage(photo), Optics.loadImage(mask)])];
     }));
-    const [images, atlas] = await Promise.all([sceneImages, Optics.loadImage(SKY_STARS), Sky.loadMoonMap()]);
+    const [images, atlas, atmosphere] = await Promise.all([
+      sceneImages, Optics.loadImage(SKY_STARS), Optics.loadImage(ATMOSPHERE), Sky.loadMoonMap()
+    ]);
     const imagesByPlace = Object.fromEntries(images);
     const canvas = $("scene");
     printSurface = document.createElement("canvas");
-    scene = Optics.createRenderer(canvas, imagesByPlace, atlas);
-    printer = Optics.createRenderer(printSurface, imagesByPlace, atlas);
+    scene = Optics.createRenderer(canvas, imagesByPlace, atlas, atmosphere);
+    printer = Optics.createRenderer(printSurface, imagesByPlace, atlas, atmosphere);
     film = Film.mount({
       draw(shot, context, sheet) {
         const {width, height} = context.canvas;

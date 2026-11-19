@@ -4,24 +4,27 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#141412">
-  <meta name="application-version" content="1.6.0">
+  <meta name="application-version" content="1.7.0">
   <title>时间暗房 · Time Darkroom</title>
-  <link rel="stylesheet" href="src/darkroom.css?v=1.6.0">
-  <link rel="stylesheet" href="src/field.css?v=1.6.0">
-  <link rel="stylesheet" href="src/local-exposure.css?v=1.6.0">
-  <link rel="stylesheet" href="src/film.css?v=1.6.0">
-  <script defer src="vendor/astronomy.browser.min.js?v=1.6.0"></script>
-  <script defer src="assets/cape.js?v=1.6.0"></script>
-  <script defer src="assets/lake.js?v=1.6.0"></script>
-  <script defer src="assets/stars.js?v=1.6.0"></script>
-  <script defer src="assets/moon.js?v=1.6.0"></script>
-  <script defer src="src/sky.js?v=1.6.0"></script>
-  <script defer src="src/optics.js?v=1.6.0"></script>
-  <script defer src="src/field.js?v=1.6.0"></script>
-  <script defer src="src/field-desk.js?v=1.6.0"></script>
-  <script defer src="src/local-exposure.js?v=1.6.0"></script>
-  <script defer src="src/film.js?v=1.6.0"></script>
-  <script defer src="src/darkroom.js?v=1.6.0"></script>
+  <link rel="stylesheet" href="src/darkroom.css?v=1.7.0">
+  <link rel="stylesheet" href="src/field.css?v=1.7.0">
+  <link rel="stylesheet" href="src/local-exposure.css?v=1.7.0">
+  <link rel="stylesheet" href="src/film.css?v=1.7.0">
+  <script defer src="vendor/astronomy.browser.min.js?v=1.7.0"></script>
+  <script defer src="assets/cape.js?v=1.7.0"></script>
+  <script defer src="assets/lake.js?v=1.7.0"></script>
+  <script defer src="assets/stars.js?v=1.7.0"></script>
+  <script defer src="assets/moon.js?v=1.7.0"></script>
+  <script defer src="assets/atmosphere.js?v=1.7.0"></script>
+  <script defer src="assets/field-light.js?v=1.7.0"></script>
+  <script defer src="src/light.js?v=1.7.0"></script>
+  <script defer src="src/sky.js?v=1.7.0"></script>
+  <script defer src="src/optics.js?v=1.7.0"></script>
+  <script defer src="src/field.js?v=1.7.0"></script>
+  <script defer src="src/field-desk.js?v=1.7.0"></script>
+  <script defer src="src/local-exposure.js?v=1.7.0"></script>
+  <script defer src="src/film.js?v=1.7.0"></script>
+  <script defer src="src/darkroom.js?v=1.7.0"></script>
 </head>
 <body>
   <header class="topbar">
@@ -83,6 +86,7 @@
               <button id="play" class="quiet" type="button" aria-pressed="false"><span class="play-glyph" aria-hidden="true"></span><span id="play-label">让时间流动</span></button>
               <label class="sound quiet"><input type="checkbox" id="sound"><span class="sound-glyph" aria-hidden="true">♩</span><span id="sound-title">海声</span></label>
               <button id="share" class="quiet" type="button"><span class="share-glyph" aria-hidden="true">↗</span>分享曝光</button>
+              <button id="field-original" class="quiet" type="button" aria-pressed="false" hidden>对照原片</button>
               <button id="film-open" class="quiet" type="button" aria-haspopup="dialog" disabled><span class="film-glyph" aria-hidden="true"></span>时间短片</button>
             </div>
             <div class="deck-side">
@@ -151,7 +155,7 @@
       <div class="shelf-head"><div><h2 id="shelf-title">底片夹</h2><p>打开一张底片，就能回到它的时间。</p></div><span id="shelf-tally"></span></div>
       <div id="plates" class="plates"></div>
     </section>
-    <footer><span>TIME DARKROOM · v1.6.0</span><span>岬角灯塔 / 镜湖 / 取景台</span></footer>
+    <footer><span>TIME DARKROOM · v1.7.0</span><span>岬角灯塔 / 镜湖 / 取景台</span></footer>
   </main>
   <dialog id="manual">
     <form method="dialog"><button class="quiet close" value="close" aria-label="关闭说明">×</button></form>
@@ -159,7 +163,7 @@
     <p>画面沿曝光方向依次取样。取景框下方的五个刻度显示从起点到终点的时刻。把方向调到 90°，时间就会从天空流向海面。</p>
     <p>切换取景地时，当前曝光参数会随你过去。在镜湖，水面倒映的是湖面所取的时刻，天已经亮了，水里还可以有星星。</p>
     <p>从取景框顶部打开「天象」可改变观测日期。日月只会在该时刻进入镜头且未被地形挡住时出现。</p>
-    <p>在「取景台」可以导入自己的照片，或从 Wikimedia Commons 选取景片。同机位的多张实拍可按时刻混合。单张只做色调推演。</p>
+    <p>在「取景台」可以导入自己的照片，或从 Wikimedia Commons 选取景片。同机位的多张实拍可按时刻混合，单张可推演光线。点击「对照原片」可查看离中心时刻最近的拍摄样本。</p>
     <p>开启「局部曝光」，点画面放一个曝光圈，拖圈心移动。每处可设时刻、半径和羽化。重叠时，后加入的圈覆盖前面的圈。</p>
     <p>在「时间短片」里选另一时刻，或给已有的曝光圈点一个终点。两种运动都会回到起点，可以预览并导出循环短片。</p>
     <dl>
@@ -236,6 +240,13 @@
               <label><input type="radio" name="field-mix" value="blend" checked> 柔接</label>
               <label><input type="radio" name="field-mix" value="cut"> 切片</label>
             </fieldset>
+            <details id="field-lighting" hidden>
+              <summary>校准单张的晨昏</summary>
+              <div class="field-light-times">
+                <label>当地日出 <input id="field-dawn" type="time" value="06:00"></label>
+                <label>当地日落 <input id="field-dusk" type="time" value="18:00"></label>
+              </div>
+            </details>
           </div>
         </div>
       </section>

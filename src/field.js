@@ -1,6 +1,6 @@
 /* Personal reels stay in this browser. A saved print points to its immutable contact sheet. */
 const Field = (() => {
-  const maxFrames = 6, tileWidth = 1200, tileHeight = 675, day = 1440;
+  const maxFrames = 6, tileWidth = 1344, tileHeight = 756, day = 1440;
   const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
   const id = () => `f-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,11)}`;
   const parseTime = (text = "") => {
@@ -9,6 +9,9 @@ const Field = (() => {
   };
   const formatTime = minute => Number.isFinite(minute) ? Optics.clock(minute) : "";
   const validMinute = value => Number.isInteger(value) && value >= 0 && value < day;
+  const defaultLight = Object.freeze([360, 1080]);
+  const validLight = times => Array.isArray(times) && times.length === 2 && times.every(validMinute) && times[0] !== times[1];
+  const lightHours = value => validLight(value) ? value : defaultLight;
   const text = (value, length) => typeof value === "string" ? value.trim().slice(0, length) : "";
   const commonsURL = value => {
     try {
@@ -36,7 +39,10 @@ const Field = (() => {
         !value.times.every((minute, i, list) => Number.isInteger(minute) && minute >= 0 && minute < day*2 &&
           (i===0 ? minute < day : minute > list[i-1] && minute < list[0]+day))) return null;
     const credits = Array.isArray(value.credits) ? value.credits.map(credit).filter(Boolean).slice(0,maxFrames) : [];
-    return {id:value.id,title:text(value.title,52) || "自带景片", times:[...value.times], mix:value.mix, credits};
+    return {
+      id: value.id, title: text(value.title, 52) || "自带景片", times: [...value.times], mix: value.mix, credits,
+      ...(value.times.length === 1 ? {light: [...lightHours(value.light)]} : {})
+    };
   }
 
   function arrange(rows) {
@@ -132,6 +138,9 @@ const Field = (() => {
     }
     const image = await decode(blob);
     const scale = Math.min(1,1800/Math.max(image.width,image.height));
+    const fields = {id:id(), name:text(name,150)||"照片", minute:minute ?? await shootingTime(blob),
+      x:0, y:0, zoom:1, source:credit(source)};
+    if (scale === 1 && blob.type === "image/jpeg" && blob.size <= 3 * 1024 * 1024) return {...fields, blob};
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1,Math.round(image.width*scale));
     canvas.height = Math.max(1,Math.round(image.height*scale));
@@ -139,8 +148,7 @@ const Field = (() => {
     context.fillStyle = "#151411";
     context.fillRect(0,0,canvas.width,canvas.height);
     context.drawImage(image,0,0,canvas.width,canvas.height);
-    return {id:id(),name:text(name,150)||"照片",blob:await toJpeg(canvas,.92),
-      minute:minute ?? await shootingTime(blob),x:0,y:0,zoom:1,source:credit(source)};
+    return {...fields, blob:await toJpeg(canvas,.965)};
   }
 
   function framing(image,row,w,h) {
@@ -213,8 +221,8 @@ const Field = (() => {
       context.restore();
     }
     const manifest=validate({id:id(),title:draft.title,times:items.map(item=>item.minute),
-      mix:draft.mix,credits:items.map(item=>item.row.source)});
-    const blob=await toJpeg(canvas,.93);
+      mix:draft.mix,light:draft.light,credits:items.map(item=>item.row.source)});
+    const blob=await toJpeg(canvas,.965);
     remember(manifest.id,{blob,image:await decode(blob),stored:false});
     return manifest;
   }
@@ -230,8 +238,12 @@ const Field = (() => {
     if (unwrapped <= end) return unwrapped;
     return unwrapped - end > start + day - unwrapped ? start : end;
   }
+  function nearestMinute(manifest, minute) {
+    const sample = sampledMinute(manifest, minute);
+    return manifest.times.reduce((first, next) => Math.abs(next - sample) < Math.abs(first - sample) ? next : first);
+  }
   function caption(items) {
-    return items.length===1 ? "单张推演 · 色调模拟" :
+    return items.length===1 ? "单张推演 · 光线模拟" :
       `${items.length} 张原片 · ${formatTime(items[0])} → ${items.at(-1)>=day?"次日 ":""}${formatTime(items.at(-1))}`;
   }
 
@@ -258,6 +270,6 @@ const Field = (() => {
     return new Blob([bytes.subarray(0,-12),chunk,bytes.subarray(-12)],{type:"image/png"});
   }
 
-  return {maxFrames,tileWidth,tileHeight,credit,validate,arrange,formatTime,parseTime,normalize,
-    load,save,photoImage,framing,paint,compile,initial,sampledMinute,caption,select,get,open,keep,forget,attribution,writeCredit};
+  return {maxFrames,tileWidth,tileHeight,credit,validate,arrange,formatTime,parseTime,normalize,validLight,lightHours,
+    load,save,photoImage,framing,paint,compile,initial,sampledMinute,nearestMinute,caption,select,get,open,keep,forget,attribution,writeCredit};
 })();

@@ -2,7 +2,7 @@ const FieldDesk = (() => {
   const $ = id => document.getElementById(id);
   const desk=$("field-desk"), gallery=$("field-frames"), alignment=$("align-canvas");
   const tabs=[$("local-tab"),$("world-tab")];
-  const draft={title:"",rows:[],mix:"blend"};
+  const draft={title:"",rows:[],mix:"blend",light:Field.lightHours()};
   let selected, busy=false, drawing=0, drag=null, onExpose;
   const current = () => draft.rows.find(row=>row.id===selected) || draft.rows[0];
   const bounds = value => Math.max(-1,Math.min(1,value));
@@ -35,6 +35,8 @@ const FieldDesk = (() => {
     $("local-photo").disabled=busy||draft.rows.length>=Field.maxFrames;
     $("expose-reel").disabled=busy||Boolean(arrange.error);
     $("field-mix").disabled=draft.rows.length<2;
+    $("field-lighting").hidden=draft.rows.length!==1;
+    $("field-dawn").disabled=$("field-dusk").disabled=busy;
     $("reel-window").textContent=arrange.items
       ? Field.caption(arrange.items.map(item=>item.minute)) : draft.rows.length?arrange.error:"";
     if(draft.rows.length===1&&draft.rows[0].minute===null) $("reel-window").textContent+=" · 原片锚点 12:00";
@@ -181,6 +183,20 @@ const FieldDesk = (() => {
   $("reel-title").addEventListener("input",event=>{draft.title=event.target.value;});
   $("reel-title").addEventListener("change",persist);
   $("field-mix").addEventListener("change",event=>{draft.mix=event.target.value;persist();});
+  const lightTimes = [$("field-dawn"), $("field-dusk")];
+  for (const input of lightTimes) {
+    input.addEventListener("change", () => {
+      const light = lightTimes.map(control => Field.parseTime(control.value));
+      if (!Field.validLight(light)) {
+        lightTimes.forEach((control, i) => { control.value = Field.formatTime(draft.light[i]); });
+        status("请填写两个不同的日出和日落时刻。");
+        return;
+      }
+      draft.light = light;
+      status("已设置当地晨昏时刻。");
+      persist();
+    });
+  }
   $("ghost").addEventListener("change",drawAlignment);
   $("field-zoom").addEventListener("input",event=>{
     const row=current();
@@ -431,6 +447,8 @@ const FieldDesk = (() => {
         draft.rows=value.rows.filter(row=>row?.blob instanceof Blob&&typeof row.name==="string").slice(0,Field.maxFrames);
         draft.title=typeof value.title==="string"?value.title.slice(0,52):"";
         draft.mix=value.mix==="cut"?"cut":"blend";
+        draft.light=Field.lightHours(value.light);
+        lightTimes.forEach((control, i) => { control.value = Field.formatTime(draft.light[i]); });
         $("reel-title").value=draft.title;
         desk.querySelector('[name="field-mix"][value="'+draft.mix+'"]').checked=true;
       }

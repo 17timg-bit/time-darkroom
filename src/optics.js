@@ -104,7 +104,7 @@ void main() {
 
   const fragment = `precision highp float;
 varying vec2 uv;
-uniform sampler2D uPhoto, uMask, uAtlas;
+uniform sampler2D uPhoto, uMask, uAtlas, uAtmosphere, uFieldMask;
 uniform float uCenter, uSpan, uCurve[5];
 uniform vec2 uDirection;
 uniform int uSpotCount;
@@ -121,7 +121,7 @@ uniform vec4 uSun, uMoon, uReflection;
 uniform vec3 uMoonLight, uReflectionLight;
 uniform sampler2D uReel;
 uniform int uFrameCount, uCut;
-uniform vec2 uGrid, uTileInset;
+uniform vec2 uGrid, uTileInset, uLightHours;
 uniform float uFrameTimes[6], uLastFrameTime;
 const float TAU = 6.283185307;
 const float DEG = .01745329251994;
@@ -168,6 +168,36 @@ vec3 solarDirection(float hour) {
 float daylight(float solarAlt) {
   return smoothstep(sin(-9.*DEG), sin(14.*DEG), solarAlt);
 }
+float luminance(vec3 color) { return dot(color, vec3(.2126, .7152, .0722)); }
+vec3 linearRGB(vec3 c) {
+  return mix(c / 12.92, pow((c + .055) / 1.055, vec3(2.4)), step(vec3(.04045), c));
+}
+vec3 imageRGB(vec3 c) {
+  c = clamp(c, 0., 1.);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1./2.4)) - .055, step(vec3(.0031308), c));
+}
+vec3 skySlice(float plane, float facing, float up) {
+  vec2 coord = vec2((.5 + 47. * facing) / 48., (20. * plane + .5 + 19. * up) / 1140.);
+  return texture2D(uAtmosphere, coord).rgb;
+}
+vec3 atmosphericLight(vec3 ray, vec3 solar, float elevation) {
+  float facing = .5 + .5 * dot(normalize(ray.xy), normalize(solar.xy));
+  float up = clamp(ray.z / .8, 0., 1.);
+  float plane = clamp(elevation + 4., 0., 56.);
+  float first = floor(plane);
+  vec3 logLight = mix(skySlice(first, facing, up), skySlice(min(56., first + 1.), facing, up), fract(plane));
+  vec3 light = exp2(logLight * 17. - 13.);
+  // Below the measured model grid, continue dimming and let the sunward glow cool.
+  float deep = max(0., -4. - elevation);
+  return mix(light, luminance(light) * vec3(.54, .88, 1.68), smoothstep(0., 9., deep) * .64) * exp2(-.94 * deep);
+}
+vec3 chromaticity(vec3 light) {
+  return clamp(light / max(.000003, luminance(light)), vec3(.36), vec3(2.05));
+}
+vec3 rollHighlights(vec3 source, float gain) {
+  float peak = max(source.r, max(source.g, source.b));
+  return source * gain / (1. + max(0., gain - 1.) * smoothstep(.12, 1., peak) * peak);
+}
 float hash(vec2 p) {
   vec3 a = fract(vec3(p.xyx) * .1031);
   a += dot(a, a.yzx + 33.33);
@@ -199,29 +229,66 @@ float moondisc(vec3 ray, vec4 body, vec3 light) {
 }
 vec3 reelTile(vec2 point, float number) {
   vec2 tile = vec2(mod(number,uGrid.x),floor(number/uGrid.x));
-  vec2 centreSafe = mix(uTileInset,1.-uTileInset,point);
+  vec2 centreSafe = mix(uTileInset,1.-uTileInset,clamp(point,0.,1.));
   return texture2D(uReel,(tile + centreSafe)/uGrid).rgb;
 }
-vec3 singleLight(float minute) {
-  float hour=mod(minute/60.,24.);
-  float sun=smoothstep(5.,8.6,hour)*(1.-smoothstep(17.1,20.3,hour));
-  float amber=bell(hour,6.55,1.24)+bell(hour,18.2,1.32);
-  return mix(vec3(.25,.32,.47),vec3(1.),sun)+amber*vec3(.39,.13,-.035);
+vec3 lightClock(float minute) {
+  float sinceDawn = mod(minute - uLightHours.x, 1440.);
+  float dayLength = mod(uLightHours.y - uLightHours.x, 1440.);
+  float elevation = sinceDawn < dayLength
+    ? 42. * sin(.5 * TAU * sinceDawn / dayLength)
+    : -26. * sin(.5 * TAU * (sinceDawn - dayLength) / (1440. - dayLength));
+  float stops = -.72 * (1. - smoothstep(2., 18., elevation)) - 4.7 * (1. - smoothstep(-15., .8, elevation));
+  float gold = bell(elevation, 3.2, 8.7);
+  float blue = (1. - smoothstep(-11., 4., elevation)) * (.63 + .37 * smoothstep(-22., -6., elevation));
+  return vec3(stops, gold, blue);
+}
+vec3 relightSingle(vec2 point, vec3 original, float minute) {
+  vec3 from = lightClock(uFrameTimes[0]);
+  vec3 to = lightClock(minute);
+  vec3 change = to - from;
+  if (length(change) < .00002) return original;
+  vec2 region = texture2D(uFieldMask, point).rg;
+  float sky = region.x;
+  vec3 source = linearRGB(original);
+  float tint = .28 + .66 * sky;
+  vec3 balance = exp2(tint * (change.y * vec3(.26, .045, -.31) + change.z * vec3(-.42, -.10, .30)));
+  float stops = clamp(change.x * mix(${FIELD_LIGHT.terrainStops.toFixed(4)}, 1., sky), -6.1, 3.1);
+  float brightDetail = smoothstep(.63, .98, luminance(source)) * region.y * (1. - sky) * .28;
+  // Local bright detail holds a little longer, while ordinary whites still follow the exposure.
+  return imageRGB(rollHighlights(source * balance, exp2(stops * (1. - brightDetail))));
+}
+float reelBaseLuminance(vec2 point, float frame) {
+  vec2 radius = 4.5 * uTileInset;
+  vec3 sum = reelTile(point + vec2(radius.x, 0.), frame) + reelTile(point - vec2(radius.x, 0.), frame)
+           + reelTile(point + vec2(0., radius.y), frame) + reelTile(point - vec2(0., radius.y), frame);
+  return luminance(linearRGB(sum * .25));
+}
+vec3 blendReel(vec2 point, float first, float amount) {
+  vec3 a = reelTile(point, first), b = reelTile(point, first + 1.);
+  if (amount <= .000001) return a;
+  if (amount >= .999999) return b;
+  a = linearRGB(a);
+  b = linearRGB(b);
+  const float floorLight = .002;
+  float ya = luminance(a) + floorLight, yb = luminance(b) + floorLight;
+  float baseA = reelBaseLuminance(point, first) + floorLight;
+  float baseB = reelBaseLuminance(point, first + 1.) + floorLight;
+  float detail = mix(log2(ya / baseA), log2(yb / baseB), smoothstep(.32, .68, amount));
+  float light = exp2(mix(log2(baseA), log2(baseB), amount) + detail);
+  vec3 balanced = mix(a / ya, b / yb, amount);
+  return imageRGB(balanced * light);
 }
 vec3 reelExposure(vec2 point,float minute) {
   vec3 first=reelTile(point,0.);
-  if(uFrameCount==1) {
-    vec3 ratio=clamp(singleLight(minute)/singleLight(uFrameTimes[0]),.40,1.72);
-    return clamp(first*ratio,0.,1.);
-  }
+  if(uFrameCount==1) return relightSingle(point, first, minute);
   float current = reelTime(minute);
   for(int i=1;i<6;i++) {
     if(i>=uFrameCount) break;
     if(current<=uFrameTimes[i]) {
       float amount=(current-uFrameTimes[i-1])/(uFrameTimes[i]-uFrameTimes[i-1]);
       if(uCut==1) return reelTile(point,amount<.5 ? float(i-1) : float(i));
-      vec3 a=reelTile(point,float(i-1)), b=reelTile(point,float(i));
-      return sqrt(mix(a*a,b*b,amount));
+      return blendReel(point, float(i-1), amount);
     }
   }
   return first;
@@ -234,12 +301,11 @@ void main() {
   }
   vec3 solar = solarDirection(t);
   float solarAlt = solar.z;
+  float elevation = asin(clamp(solarAlt, -1., 1.)) / DEG;
   float day = daylight(solarAlt);
-  float night = 1. - smoothstep(sin(-18.*DEG), sin(-6.*DEG), solarAlt);
-  float warm = bell(solarAlt, sin(-2.*DEG), .098);
+  float night = 1. - smoothstep(-18., -6., elevation);
   float horizon = uWater.x;
   float mirror = uWater.y;
-  float skyGlow = bell(uv.y, horizon - .04, .34);
   vec3 ray = cameraRay(uv, horizon);
   vec2 mask = texture2D(uMask, uv).rg;
   float seaDepth = clamp((uv.y - horizon) * 2.08, 0., 1.);
@@ -249,49 +315,66 @@ void main() {
     sin(uv.y * 117. - tide * 24. + uv.x * 31.) * .0010
   ) * mask.g * smoothstep(.004, .09, seaDepth) * (.36 + seaDepth) * mix(1., .55, mirror);
   vec3 raw = texture2D(uPhoto, uv + ripple).rgb;
-  float value = dot(raw, vec3(.2126, .7152, .0722));
-  vec3 silver = mix(vec3(value), raw, .71);
-  vec3 dayTone = silver * vec3(1.02, 1.04, 1.04);
-  dayTone += vec3(-.039, .026, .039) * mask.r * (1. - uv.y);
-  vec3 nightTone = silver * vec3(.15, .208, .319) + vec3(.007, .011, .022);
-  nightTone += mask.r * vec3(.016, .013, .032) * skyGlow;
-  vec3 color = mix(nightTone, dayTone, day);
-  float solarSide = .36 + .64 * pow(max(0.,dot(normalize(ray.xy),normalize(solar.xy))),2.);
-  color += warm * solarSide * (mask.r * vec3(.38, .186, .103) * (.24 + .76 * skyGlow)
-                         + vec3(.17, .084, .022) * silver);
-  if (night > .001 && mask.r > .001) color += night * mask.r * starscape(ray, t);
+  vec3 source = linearRGB(raw);
+  float direct = smoothstep(-.8, 8., elevation);
+  float lowSun = direct * (1. - smoothstep(7., 29., elevation));
+  float diffuse = smoothstep(-13., 17., elevation);
+  vec3 ambientTint = mix(vec3(.72, .85, 1.13), vec3(.97, 1., 1.01), diffuse);
+  vec3 sunlightTint = mix(vec3(1.), vec3(1.31, .98, .69), lowSun * .68);
+  float sunlit = .79 + .21 * smoothstep(.045, .40, luminance(source));
+  vec3 ground = source * ((.027 + .33 * diffuse) * ambientTint + .75 * direct * sunlit * sunlightTint);
+  vec3 lit = ground;
+  float clearAir = mix(.91, .56, smoothstep(.38, .80, luminance(raw)));
+  if (mask.r > .001) {
+    vec3 atmosphere = atmosphericLight(ray, solar, elevation);
+    float level = luminance(atmosphere);
+    float gain = .008 + 1.10 * pow(level / (1. + .63 * level), .44);
+    vec3 tint = mix(vec3(1.), chromaticity(atmosphere), .56 + .15 * (1. - day));
+    vec3 sky = rollHighlights(source * tint, gain);
+    lit = mix(lit, sky, mask.r);
+  }
+  vec2 reflected = vec2(uv.x, 2. * horizon - uv.y);
+  if (mask.g > .001) {
+    reflected.x += sin(uv.y * 145. + uv.x * 27. - tide * 17.) * (.0011 + seaDepth * .0025);
+    reflected.y += sin(uv.y * 310. - tide * 23.) * seaDepth * .0018;
+    vec3 atmosphere = atmosphericLight(cameraRay(reflected, horizon), solar, elevation);
+    float level = luminance(atmosphere);
+    float gain = .012 + .91 * pow(level / (1. + .86 * level), .47);
+    vec3 tint = mix(vec3(1.), chromaticity(atmosphere), .54);
+    vec3 waterLight = rollHighlights(source * tint, gain);
+    float reflectedSky = mix(.73, texture2D(uMask, reflected).r, mirror);
+    float reflectance = (.45 + .37 * (1. - seaDepth)) * mix(.27, 1., reflectedSky);
+    lit = mix(lit, mix(ground, waterLight, reflectance), mask.g);
+  }
+  vec3 color = imageRGB(lit);
+  if (night > .001 && mask.r > .001) color += night * mask.r * clearAir * starscape(ray, t);
 
   float sunHeight = uSun.z;
   vec3 sunColor = mix(vec3(1.,.96,.86), vec3(1.,.48,.20), 1. - smoothstep(0.,.19,sunHeight));
   if (uSun.w > 0. && mask.r > .001) {
     float distanceToSun = length(ray - uSun.xyz);
     float disc = 1. - smoothstep(uSun.w * .70, uSun.w * 1.21, distanceToSun);
-    float halo = exp(-distanceToSun * 86.) * .19 + exp(-distanceToSun * 26.) * .05;
-    color += mask.r * sunColor * (disc*.91 + halo);
+    float halo = exp(-distanceToSun * 105.) * .12 + exp(-distanceToSun * 37.) * .042;
+    color += mask.r * sunColor * (disc * .94 + halo * clearAir);
   }
   if (mask.g > .001 && solarAlt > -.008) {
     float towardSun = length(normalize(ray.xy) - normalize(solar.xy));
     float glitter = max(0., sin(uv.y * 260. + seaDepth * seaDepth * 390. - tide * 25. + sin(uv.x * 149.)));
-    color += (vec3(.62,.56,.49) + vec3(.28,-.12,-.28)*warm) *
+    color += mix(vec3(.65,.64,.61), vec3(.94,.69,.46), lowSun) *
       bell(towardSun,0.,.024+seaDepth*.09) * glitter*glitter * mask.g *
-      bell(solarAlt,.02,.16) * .062 * (1.-mirror*.45);
+      bell(solarAlt,.033,.13) * .051 * (1.-mirror*.45);
   }
   color += mask.r * mix(vec3(.89,.92,.99), vec3(.50,.57,.65),day) *
            moondisc(ray, uMoon, uMoonLight) * (1.-day*.55);
   if (mirror > 0. && mask.g > .01) {
     // Water reflects the sky from the time assigned to this point on the lake.
-    vec2 reflected = vec2(uv.x, 2. * horizon - uv.y);
-    reflected.x += sin(uv.y * 145. + uv.x * 27. - tide * 17.) * (.0011 + seaDepth * .0025);
-    reflected.y += sin(uv.y * 310. - tide * 23.) * seaDepth * .0018;
     float reflectedSky = texture2D(uMask, reflected).r;
     float gloss = .78 + .22 * sin(uv.y * 180. - tide * 23. + uv.x * 12.);
     vec3 silverLight = vec3(.54, .73, .95);
     vec3 reflectedRay = cameraRay(reflected, horizon);
     float moonImage = moondisc(reflectedRay,uReflection,uReflectionLight);
-    vec3 starsOnWater = starscape(reflectedRay,t) * night * .47;
+    vec3 starsOnWater = night > .001 ? starscape(reflectedRay,t) * night * .31 : vec3(0.);
     color += mask.g * reflectedSky * gloss * (silverLight * moonImage * (1.-day*.79) + starsOnWater);
-    color += mask.g * reflectedSky *
-             (night * vec3(.005, .023, .044) + warm * vec3(.084, .040, .018)) * (.82 - seaDepth * .38);
   }
 
   if (uLantern.z > 0.) {
@@ -309,9 +392,9 @@ void main() {
              (lampCore + lampGlow + .263 * beam * mask.r * (.24 + night * .76));
   }
   float edge = length((uv - .5) * vec2(1., .84));
-  color *= 1. - .27 * smoothstep(.19, .67, edge);
+  color *= 1. - .11 * smoothstep(.19, .67, edge);
   float grain = hash(floor(uv * vec2(1680., 944.))) - .5;
-  color += grain * (.007 + .013 * day);
+  color += grain * (.002 + .004 * day);
   gl_FragColor = vec4(clamp(color, 0., 1.), 1.);
 }`;
 
@@ -324,7 +407,7 @@ void main() {
     });
   }
 
-  function createRenderer(canvas, imagesByPlace, starAtlas) {
+  function createRenderer(canvas, imagesByPlace, starAtlas, atmosphere) {
     const gl = canvas.getContext("webgl", {
       alpha: false, antialias: false, depth: false, premultipliedAlpha: false,
       preserveDrawingBuffer: true, powerPreference: "low-power"
@@ -359,7 +442,8 @@ void main() {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+      if (image) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+      else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
       return texture;
     }
     const textures = Object.fromEntries(Object.entries(imagesByPlace)
@@ -369,6 +453,10 @@ void main() {
     gl.uniform1i(gl.getUniformLocation(program, "uMask"), 1);
     gl.uniform1i(gl.getUniformLocation(program, "uAtlas"), 2);
     gl.uniform1i(gl.getUniformLocation(program, "uReel"), 3);
+    gl.uniform1i(gl.getUniformLocation(program, "uAtmosphere"), 4);
+    gl.uniform1i(gl.getUniformLocation(program, "uFieldMask"), 5);
+    createTexture(atmosphere, 4);
+    const fieldMask = createTexture(null, 5);
     const center = gl.getUniformLocation(program, "uCenter");
     const span = gl.getUniformLocation(program, "uSpan");
     const curve = gl.getUniformLocation(program, "uCurve[0]");
@@ -396,15 +484,9 @@ void main() {
     const fieldGrid=gl.getUniformLocation(program,"uGrid");
     const fieldTimes=gl.getUniformLocation(program,"uFrameTimes[0]");
     const fieldLast=gl.getUniformLocation(program,"uLastFrameTime");
-    gl.uniform2f(gl.getUniformLocation(program,"uTileInset"),.5/Field.tileWidth,.5/Field.tileHeight);
-    const reelTexture=gl.createTexture();
-    gl.activeTexture(gl.TEXTURE3);
-    gl.bindTexture(gl.TEXTURE_2D,reelTexture);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([0,0,0,255]));
+    const lightHours=gl.getUniformLocation(program,"uLightHours");
+    const tileInset = gl.getUniformLocation(program, "uTileInset");
+    const reelTexture = createTexture(null, 3);
     let activePlace;
     let activeSky;
     let activeReel;
@@ -442,12 +524,19 @@ void main() {
             gl.activeTexture(gl.TEXTURE3);
             gl.bindTexture(gl.TEXTURE_2D,reelTexture);
             gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);
-            const cols=Math.min(3,times.length), values=new Float32Array(Field.maxFrames);
+            const cols=Math.min(3,times.length), rows=Math.ceil(times.length/cols), values=new Float32Array(Field.maxFrames);
             values.set(times);
-            gl.uniform2f(fieldGrid,cols,Math.ceil(times.length/cols));
+            gl.uniform2f(fieldGrid,cols,rows);
+            gl.uniform2f(tileInset,.5*cols/image.width,.5*rows/image.height);
             gl.uniform1fv(fieldTimes,values);
             gl.uniform1f(fieldLast,times.at(-1));
             gl.uniform1i(fieldCut,Number(mix==="cut"));
+            if (times.length === 1) {
+              gl.uniform2fv(lightHours, Field.lightHours(state.field.light));
+              gl.activeTexture(gl.TEXTURE5);
+              gl.bindTexture(gl.TEXTURE_2D, fieldMask);
+              gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, Light.photoMask(image));
+            }
             activeReel=id;
           }
           gl.uniform1i(fieldCount,times.length);

@@ -2,7 +2,7 @@
 
 在岬角灯塔和镜湖，清晨、白昼和深夜可以被冲印在同一张照片上。
 
-[进入在线暗房](https://17timg-bit.github.io/time-darkroom/) · [打开取景台](https://17timg-bit.github.io/time-darkroom/#field) · [播放短片示例](https://17timg-bit.github.io/time-darkroom/#film) · [版本记录](CHANGELOG.md)
+[进入在线暗房](https://17timg-bit.github.io/time-darkroom/) · [看海岬的暮光](https://17timg-bit.github.io/time-darkroom/#twilight) · [打开取景台](https://17timg-bit.github.io/time-darkroom/#field) · [播放短片示例](https://17timg-bit.github.io/time-darkroom/#film) · [版本记录](CHANGELOG.md)
 
 双击 **打开时间暗房.html**。建议用启用了 WebGL 的 Edge 或 Chrome。项目可以离线运行，移动时把整个文件夹一起带走。
 
@@ -17,6 +17,12 @@
 7. **留下或分享这次曝光。** 从底片夹导出 2000 × 1350 PNG，印样会标注观测日期、取景地、五处取样时刻和曝光方向。点「分享曝光」，对方可以在在线暗房打开同一画面继续修改。
 
 用方向键微调已聚焦的曲线节点，按住 Shift 可大步调整。在未聚焦控件时，空格播放或暂停，P 冲印。
+
+## 暮光显影
+
+日落以后，岩石先失去直射光，天空仍有一段余光。海面接到的是反射方向的光。打开「海岬最后的天光」或「镜湖蓝调」，用「同刻」拨过太阳落山前后，就能看到三者如何交替。模型参数、真实延时训练来源和重建方法见[暮光模型](docs/暮光模型.md)。
+
+![岬角灯塔和镜湖的四个暮光时段](预览/暮光样张.jpg)
 
 ## 局部曝光
 
@@ -41,8 +47,8 @@
 ## 用自己的照片创作
 
 - **取景台 → 本地胶卷**接受 1–6 张 JPG、PNG、WebP 或 AVIF，每张最多 25 MB。JPEG 有拍摄时间时会预填，可自行修正。没有拍摄时刻的单张以 12:00 为原片锚点。
-- **同机位连曝**适合用同一机位、焦距和构图拍的素材。缩放后拖动画面，用第一张当参考。填好每张的不同拍摄时刻后带入暗房。「柔接」混合相邻原片，「切片」选最近的原片。自动采用覆盖素材的最短昼夜区间，区间外取最近端的原片。
-- **单张推演**改变明暗和色调。内置景片的日月星空另由两处固定参考站计算。
+- **同机位连曝**适合用同一机位、焦距和构图拍的素材。缩放后拖动画面，用第一张当参考。填好每张的不同拍摄时刻后带入暗房。「柔接」过渡亮度、色彩和细节，「切片」选最近的原片。自动采用覆盖素材的最短昼夜区间，区间外取最近端的原片。
+- **单张推演**让天空和地物按不同幅度变化。在「校准单张的晨昏」填写当地日出、日落可以对准光线变化。原片时刻保留照片的调子。点「对照原片」可以随时和拍摄样本比较。
 - **世界漫游**按地名与光线筛选 [Wikimedia Commons](https://commons.wikimedia.org/) 景片。搜索词用于找图，拍摄时间来自记录或你手填。原片署名可从胶卷与暗房查看，PNG 带可见署名与完整 Attribution 元数据。使用 CC BY-SA 图像公开衍生印样时，须按相同许可分享。
 - 你的照片和胶卷只在当前浏览器存储。取景台保留最近编辑的胶卷，已冲印的底片保有各自独立素材快照。自带景片通过 PNG 分享。
 
@@ -58,11 +64,14 @@
 │   ├── cape.js         岬角灯塔景片与遮罩
 │   ├── lake.js         镜湖景片与遮罩
 │   ├── stars.js        真实星表的离线投影纹理
-│   └── moon.js         离线月面反照率纹理
+│   ├── moon.js         离线月面反照率纹理
+│   ├── atmosphere.js   大气散射采样纹理
+│   └── field-light.js  轻量天空模型
 ├── src/
 │   ├── darkroom.css    界面与不同窗口的布局
 │   ├── darkroom.js     曝光台、底片夹、海声和 PNG 冲印
 │   ├── optics.js       时间映射与 WebGL 成像
+│   ├── light.js        本地照片分析
 │   ├── sky.js          天文历表、镜头投影和月相
 │   ├── field.js        原片导入、校片素材和本地存储
 │   ├── field-desk.js   取景台与 Commons 检索
@@ -71,18 +80,22 @@
 │   ├── local-exposure.css 局部曝光编辑版式
 │   ├── film.js         短片预览与逐帧导出
 │   └── film.css        短片编辑器版式
-├── vendor/             Astronomy Engine、Mediabunny 及许可
+├── vendor/             第三方组件与许可
 ├── docs/
 │   ├── 景片来源.md      两幅原始景片的生成方式和提示词
-│   └── 天象模型.md      参考站、天象来源和模型范围
+│   ├── 天象模型.md      参考站、天象来源和模型范围
+│   └── 暮光模型.md      大气数据、实拍训练来源与重建
 ├── scripts/
 │   ├── sync-entry.mjs  从离线入口同步在线入口
-│   └── build-sky-assets.py  重建星图与月面纹理
+│   ├── build-sky-assets.py  重建星图与月面纹理
+│   ├── sample-atmosphere.cpp 和 build-atmosphere.py  生成散射纹理
+│   └── fit-field-light.py  拟合天空与地物光线响应
 └── 预览/
     ├── 暗房预览.png
     ├── 窄屏预览.png
     ├── 局部曝光.png
     ├── 时间短片.png
+    ├── 暮光样张.jpg
     ├── 时间短片 - 夜色过海岬.mp4
     ├── 天象-月相.png
     ├── 取景台.png
@@ -102,3 +115,4 @@
 
 - Astronomy Engine 的 MIT 许可见 [Astronomy-Engine-LICENSE.txt](vendor/Astronomy-Engine-LICENSE.txt)。
 - 短片面板在本地加载 Mediabunny 1.66.1，使用其原版浏览器包。对应的 [Mediabunny 源码](https://github.com/Vanilagy/mediabunny/tree/134f1e29299ab4bb7e8609bb712c7166ca2c7496)和 [MPL 2.0 许可](vendor/Mediabunny-LICENSE.txt)可直接查看。
+- 大气纹理由 Prague Sky Model Ground 数据采样生成。 [Apache 2.0 许可](vendor/Prague-Sky-Model-LICENSE.txt)
