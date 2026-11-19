@@ -235,9 +235,9 @@ const Field = (() => {
       `${items.length} 张原片 · ${formatTime(items[0])} → ${items.at(-1)>=day?"次日 ":""}${formatTime(items.at(-1))}`;
   }
 
-  function attribution(credits) {
+  function attribution(credits, medium = "print") {
     const lines = credits.map(item => `${item.title} | ${item.by||"Author as credited on Commons"} | ${item.license} ${item.terms} | ${item.url}`);
-    if (credits.some(item => item.license==="CC BY-SA 4.0")) lines.push("Adapted print: CC BY-SA 4.0 https://creativecommons.org/licenses/by-sa/4.0/");
+    if (credits.some(item => item.license==="CC BY-SA 4.0")) lines.push(`Adapted ${medium}: CC BY-SA 4.0 https://creativecommons.org/licenses/by-sa/4.0/`);
     if (lines.length) lines.unshift("Time Darkroom: cropped and time-graded / blended source photographs.");
     return lines.join("\n");
   }
@@ -259,5 +259,5 @@ const Field = (() => {
   }
 
   return {maxFrames,tileWidth,tileHeight,credit,validate,arrange,formatTime,parseTime,normalize,
-    load,save,photoImage,framing,paint,compile,initial,sampledMinute,caption,select,get,open,keep,forget,writeCredit};
+    load,save,photoImage,framing,paint,compile,initial,sampledMinute,caption,select,get,open,keep,forget,attribution,writeCredit};
 })();

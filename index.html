@@ -4,22 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#141412">
-  <meta name="application-version" content="1.5.0">
+  <meta name="application-version" content="1.6.0">
   <title>时间暗房 · Time Darkroom</title>
-  <link rel="stylesheet" href="src/darkroom.css?v=1.5.0">
-  <link rel="stylesheet" href="src/field.css?v=1.5.0">
-  <link rel="stylesheet" href="src/local-exposure.css?v=1.5.0">
-  <script defer src="vendor/astronomy.browser.min.js?v=1.5.0"></script>
-  <script defer src="assets/cape.js?v=1.5.0"></script>
-  <script defer src="assets/lake.js?v=1.5.0"></script>
-  <script defer src="assets/stars.js?v=1.5.0"></script>
-  <script defer src="assets/moon.js?v=1.5.0"></script>
-  <script defer src="src/sky.js?v=1.5.0"></script>
-  <script defer src="src/optics.js?v=1.5.0"></script>
-  <script defer src="src/field.js?v=1.5.0"></script>
-  <script defer src="src/field-desk.js?v=1.5.0"></script>
-  <script defer src="src/local-exposure.js?v=1.5.0"></script>
-  <script defer src="src/darkroom.js?v=1.5.0"></script>
+  <link rel="stylesheet" href="src/darkroom.css?v=1.6.0">
+  <link rel="stylesheet" href="src/field.css?v=1.6.0">
+  <link rel="stylesheet" href="src/local-exposure.css?v=1.6.0">
+  <link rel="stylesheet" href="src/film.css?v=1.6.0">
+  <script defer src="vendor/astronomy.browser.min.js?v=1.6.0"></script>
+  <script defer src="assets/cape.js?v=1.6.0"></script>
+  <script defer src="assets/lake.js?v=1.6.0"></script>
+  <script defer src="assets/stars.js?v=1.6.0"></script>
+  <script defer src="assets/moon.js?v=1.6.0"></script>
+  <script defer src="src/sky.js?v=1.6.0"></script>
+  <script defer src="src/optics.js?v=1.6.0"></script>
+  <script defer src="src/field.js?v=1.6.0"></script>
+  <script defer src="src/field-desk.js?v=1.6.0"></script>
+  <script defer src="src/local-exposure.js?v=1.6.0"></script>
+  <script defer src="src/film.js?v=1.6.0"></script>
+  <script defer src="src/darkroom.js?v=1.6.0"></script>
 </head>
 <body>
   <header class="topbar">
@@ -81,6 +83,7 @@
               <button id="play" class="quiet" type="button" aria-pressed="false"><span class="play-glyph" aria-hidden="true"></span><span id="play-label">让时间流动</span></button>
               <label class="sound quiet"><input type="checkbox" id="sound"><span class="sound-glyph" aria-hidden="true">♩</span><span id="sound-title">海声</span></label>
               <button id="share" class="quiet" type="button"><span class="share-glyph" aria-hidden="true">↗</span>分享曝光</button>
+              <button id="film-open" class="quiet" type="button" aria-haspopup="dialog" disabled><span class="film-glyph" aria-hidden="true"></span>时间短片</button>
             </div>
             <div class="deck-side">
               <p id="probe-hint">在取景框上移动，查看局部时间</p>
@@ -148,7 +151,7 @@
       <div class="shelf-head"><div><h2 id="shelf-title">底片夹</h2><p>打开一张底片，就能回到它的时间。</p></div><span id="shelf-tally"></span></div>
       <div id="plates" class="plates"></div>
     </section>
-    <footer><span>TIME DARKROOM · v1.5.0</span><span>岬角灯塔 / 镜湖 / 取景台</span></footer>
+    <footer><span>TIME DARKROOM · v1.6.0</span><span>岬角灯塔 / 镜湖 / 取景台</span></footer>
   </main>
   <dialog id="manual">
     <form method="dialog"><button class="quiet close" value="close" aria-label="关闭说明">×</button></form>
@@ -158,6 +161,7 @@
     <p>从取景框顶部打开「天象」可改变观测日期。日月只会在该时刻进入镜头且未被地形挡住时出现。</p>
     <p>在「取景台」可以导入自己的照片，或从 Wikimedia Commons 选取景片。同机位的多张实拍可按时刻混合。单张只做色调推演。</p>
     <p>开启「局部曝光」，点画面放一个曝光圈，拖圈心移动。每处可设时刻、半径和羽化。重叠时，后加入的圈覆盖前面的圈。</p>
+    <p>在「时间短片」里选另一时刻，或给已有的曝光圈点一个终点。两种运动都会回到起点，可以预览并导出循环短片。</p>
     <dl>
       <dt>同刻</dt><dd>整张照片来自同一分钟。用它观察灯塔从破晓到入夜。</dd>
       <dt>扫过</dt><dd>从曝光起点走向终点，时间向前推进。</dd>
@@ -259,6 +263,65 @@
       <div><p id="reel-status" role="status">照片保存在当前浏览器。</p><p id="reel-window"></p></div>
       <button id="expose-reel" class="print" type="button" disabled>带入暗房 <span aria-hidden="true">↗</span></button>
     </footer>
+  </dialog>
+  <dialog id="film-dialog" aria-labelledby="film-title">
+    <header class="film-heading">
+      <div><h2 id="film-title">时间短片</h2><p id="film-name"></p></div>
+      <form method="dialog"><button class="quiet close" value="close" aria-label="关闭时间短片" autofocus>×</button></form>
+    </header>
+    <div class="film-editor">
+      <div class="film-view">
+        <canvas id="film-preview" width="640" height="360" aria-label="短片画面"></canvas>
+        <div class="film-route" aria-hidden="true">
+          <i id="film-route-line"></i><i id="film-route-origin"></i><i id="film-route-end"></i>
+        </div>
+      </div>
+      <div class="film-transport">
+        <button id="film-play" class="quiet" type="button" aria-pressed="false"><span class="play-glyph" aria-hidden="true"></span><span id="film-play-label">播放</span></button>
+        <div class="film-ruler">
+          <input id="film-seek" type="range" min="0" max="192" value="0" aria-label="短片播放位置">
+          <div class="film-notches" aria-hidden="true"><span>起点</span><span>折返</span><span>起点</span></div>
+        </div>
+        <span id="film-position" aria-hidden="true">0.00 / 8 秒</span>
+      </div>
+      <section class="film-settings" aria-label="短片设置">
+        <fieldset>
+          <legend>运动方式</legend>
+          <div class="segments film-modes">
+            <button id="film-time-mode" type="button" aria-pressed="true">时刻往返</button>
+            <button id="film-spot-mode" type="button" aria-pressed="false">移动曝光圈</button>
+          </div>
+        </fieldset>
+        <div id="film-time-options" class="film-adjust">
+          <label for="film-shift">折返时刻</label>
+          <span id="film-hours"></span>
+          <input id="film-shift" type="range" min="-720" max="720" step="1" value="480">
+          <div class="film-notches" aria-hidden="true"><span id="film-shift-start">−12 小时</span><span id="film-shift-origin">原时刻</span><span id="film-shift-end">＋12 小时</span></div>
+          <p id="film-date"></p>
+        </div>
+        <div id="film-spot-options" class="film-adjust" hidden>
+          <label for="film-spot">移动哪个圈</label>
+          <select id="film-spot"></select>
+          <p id="film-route-hint">点画面放置折返点。键盘聚焦画面后可用方向键微调。</p>
+        </div>
+        <label class="film-length" for="film-length">循环时长
+          <select id="film-length"><option value="6">6 秒</option><option value="8" selected>8 秒</option><option value="12">12 秒</option></select>
+        </label>
+        <button id="film-demo" class="quiet" type="button">载入示例《夜色过海岬》 <span aria-hidden="true">↗</span></button>
+      </section>
+    </div>
+    <div class="film-export-bar">
+      <div>
+        <p id="film-format">720p · 24 帧/秒 · 无声</p>
+        <progress id="film-progress" max="1" value="0" aria-label="短片导出进度" hidden></progress>
+        <p id="film-status" role="status"></p>
+      </div>
+      <div class="film-actions">
+        <button id="film-cancel" class="quiet" type="button" hidden>取消导出</button>
+        <a id="film-download" class="quiet" hidden>再次下载</a>
+        <button id="film-export" class="print" type="button" disabled>导出短片 <span aria-hidden="true">↓</span></button>
+      </div>
+    </div>
   </dialog>
   <div id="toast" role="status" aria-live="polite"></div>
 </body>

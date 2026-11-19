@@ -35,7 +35,7 @@ const thumbnails = new WeakMap();
 const sessionPlates = new Set();
 let plates = readPlates();
 let state = Optics.initial();
-let scene, printer, printSurface;
+let scene, printer, printSurface, film;
 let frame = 0;
 let lastFrame = 0;
 let updateTime = 0;
@@ -377,6 +377,19 @@ function updateNav() {
 addEventListener("hashchange", () => {
   updateNav();
   loadSharedExposure();
+  openFilmDemo();
+});
+
+function openFilmDemo() {
+  if (location.hash !== "#film" || !film || document.querySelector("dialog[open]")) return;
+  interruptPlay();
+  film.demo();
+}
+
+$("film-open").addEventListener("click", () => {
+  if (!printer || !film) return;
+  interruptPlay();
+  film.open(state, state.field?.title ?? PLACES[state.place].title);
 });
 document.addEventListener("keydown", event => {
   if (event.defaultPrevented || event.repeat || event.ctrlKey || event.altKey || event.metaKey ||
@@ -723,7 +736,8 @@ function unavailable(message) {
   playing = false;
   $("loading").hidden = false;
   $("loading").textContent = message;
-  $("print").disabled = $("play").disabled = $("spot-toggle").disabled = true;
+  $("print").disabled = $("play").disabled = $("spot-toggle").disabled = $("film-open").disabled = true;
+  if ($("film-dialog").open) $("film-dialog").close();
   renderShelf();
 }
 
@@ -754,6 +768,14 @@ async function start() {
     printSurface = document.createElement("canvas");
     scene = Optics.createRenderer(canvas, imagesByPlace, atlas);
     printer = Optics.createRenderer(printSurface, imagesByPlace, atlas);
+    film = Film.mount({
+      draw(shot, context, sheet) {
+        const {width, height} = context.canvas;
+        printer.draw(shot, width, height, sheet);
+        context.drawImage(printSurface, 0, 0, width, height);
+      },
+      example: {base: library.find(plate => plate.id === "lantern").state, name: "夜色过海岬", end: {x: .49, y: .58}}
+    });
     if ($("sky-dialog").open) updateSkyDialog();
     for (const surface of [canvas, printSurface]) surface.addEventListener("webglcontextlost", () => {
       unavailable("图形上下文已中断，请重新载入暗房。");
@@ -761,7 +783,8 @@ async function start() {
     requestDraw();
     renderShelf();
     $("loading").hidden = true;
-    $("print").disabled = $("spot-toggle").disabled = false;
+    $("print").disabled = $("spot-toggle").disabled = $("film-open").disabled = false;
+    openFilmDemo();
   } catch (error) {
     console.error(error);
     unavailable("暗房需要启用 WebGL。请在支持 WebGL 的浏览器中打开。");

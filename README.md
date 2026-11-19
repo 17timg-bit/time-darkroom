@@ -2,7 +2,7 @@
 
 在岬角灯塔和镜湖，清晨、白昼和深夜可以被冲印在同一张照片上。
 
-[进入在线暗房](https://17timg-bit.github.io/time-darkroom/) · [打开取景台](https://17timg-bit.github.io/time-darkroom/#field) · [版本记录](CHANGELOG.md)
+[进入在线暗房](https://17timg-bit.github.io/time-darkroom/) · [打开取景台](https://17timg-bit.github.io/time-darkroom/#field) · [播放短片示例](https://17timg-bit.github.io/time-darkroom/#film) · [版本记录](CHANGELOG.md)
 
 双击 **打开时间暗房.html**。建议用启用了 WebGL 的 Edge 或 Chrome。项目可以离线运行，移动时把整个文件夹一起带走。
 
@@ -27,6 +27,16 @@
 多张照片的胶卷沿已覆盖的时段过渡。比如 18:00 和次日 02:00 的原片会在午夜附近衔接；超出采样时段时使用最近的一端。
 
 局部曝光随底片保存。内置景片可用链接一起分享。冲印 PNG 保留成像与局部时刻，编辑辅助线仅显示在暗房。
+
+## 时间短片
+
+从取景框下方点「时间短片」。选「时刻往返」可调整折返时刻，原画面的曲线和方向会一起带进来。画面已有局部曝光时，可以选「移动曝光圈」，再点画面指定折返点。聚焦预览后，方向键可微调折返点。拖动播放条或用方向键逐帧查看。
+
+时长可选 6、8 或 12 秒。短片从当前曝光缓慢出发，在折返点减速，再回到起点。导出以 1280 × 720、24 帧/秒逐帧编码为无声 MP4，浏览器支持 WebM 时可用作替代。导出在当前浏览器完成，图像辅助线只出现在编辑器。使用 Commons 景片的短片也保留画面署名和完整来源元数据。CC BY-SA 衍生短片按相同许可分享。
+
+[打开《夜色过海岬》](https://17timg-bit.github.io/time-darkroom/#film) · [下载八秒样片](预览/时间短片%20-%20夜色过海岬.mp4)
+
+![《夜色过海岬》短片编辑器](预览/时间短片.png)
 
 ## 用自己的照片创作
 
@@ -58,8 +68,10 @@
 │   ├── field-desk.js   取景台与 Commons 检索
 │   ├── field.css       取景台版式
 │   ├── local-exposure.js  局部曝光编辑
-│   └── local-exposure.css 局部曝光编辑版式
-├── vendor/             Astronomy Engine 和 MIT 许可
+│   ├── local-exposure.css 局部曝光编辑版式
+│   ├── film.js         短片预览与逐帧导出
+│   └── film.css        短片编辑器版式
+├── vendor/             Astronomy Engine、Mediabunny 及许可
 ├── docs/
 │   ├── 景片来源.md      两幅原始景片的生成方式和提示词
 │   └── 天象模型.md      参考站、天象来源和模型范围
@@ -70,6 +82,8 @@
     ├── 暗房预览.png
     ├── 窄屏预览.png
     ├── 局部曝光.png
+    ├── 时间短片.png
+    ├── 时间短片 - 夜色过海岬.mp4
     ├── 天象-月相.png
     ├── 取景台.png
     ├── 时间暗房 - 一天穿过海岬.png
@@ -83,3 +97,8 @@
 自制底片保存在当前浏览器与入口下。离线和在线试玩可以各自保有底片。内置景片的「分享曝光」链接支持从离线入口带入在线暗房。
 
 在独立的 Edge 浏览器配置中打开离线入口，实际检查了鼠标拖动和键盘调节、播放与暂停、海声启动、底片保存与取回、删除取消及确认、PNG 下载，以及 320–1920 像素宽的八组窗口。移动端布局使用浏览器尺寸模拟。
+
+## 第三方组件
+
+- Astronomy Engine 的 MIT 许可见 [Astronomy-Engine-LICENSE.txt](vendor/Astronomy-Engine-LICENSE.txt)。
+- 短片面板在本地加载 Mediabunny 1.66.1，使用其原版浏览器包。对应的 [Mediabunny 源码](https://github.com/Vanilagy/mediabunny/tree/134f1e29299ab4bb7e8609bb712c7166ca2c7496)和 [MPL 2.0 许可](vendor/Mediabunny-LICENSE.txt)可直接查看。
